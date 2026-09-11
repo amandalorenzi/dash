@@ -1,0 +1,220 @@
+'use server';
+
+import { revalidatePath } from 'next/cache';
+import { adminDb } from '@/lib/firebase/admin';
+import { COLLECTIONS } from '@/config/firestore-collections';
+import { requireRole, getCurrentUser } from '@/lib/auth/session';
+import { addAuditLog } from '@/modules/audit/log';
+import { supplierAdminSchema, supplierSelfEditSchema } from '@/modules/suppliers/schemas';
+import { findSupplierByCnpj, getSupplierById } from '@/modules/suppliers/queries';
+import type { Supplier } from '@/types/domain';
+
+export type ActionResult = { ok: true } | { ok: false; error: string };
+
+/* ------------------------------------------------------------------ */
+/* ADMIN: criar / editar expositor                                     */
+/* ------------------------------------------------------------------ */
+
+export async function createSupplierAction(eventId: string, raw: unknown): Promise<ActionResult> {
+  const user = await requireRole('SUPER_ADMIN');
+  const parsed = supplierAdminSchema.safeParse(raw);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Dados inválidos.' };
+  const data = parsed.data;
+
+  const dup = await findSupplierByCnpj(eventId, data.cnpj);
+  if (dup) return { ok: false, error: `Já existe um expositor com este CNPJ neste evento: ${dup.nomeFantasia}.` };
+
+  const countSnap = await adminDb().collection(COLLECTIONS.suppliers).where('eventId', '==', eventId).count().get();
+  const codigo = `EXP-${String(countSnap.data().count + 1).padStart(3, '0')}`;
+
+  const ref = adminDb().collection(COLLECTIONS.suppliers).doc();
+  const now = new Date().toISOString();
+  const supplier: Supplier = {
+    id: ref.id, eventId, codigo,
+    razaoSocial: data.razaoSocial, nomeFantasia: data.nomeFantasia, cnpj: data.cnpj,
+    inscricaoEstadual: data.inscricaoEstadual ?? '', endereco: data.endereco, responsavel: data.responsavel,
+    nomeExibido: data.nomeFantasia, standNumero: data.standNumero, standLocalizacao: data.standLocalizacao ?? '',
+    standMetragem: data.standMetragem ?? 0, categoria: data.categoria, observacoesInternas: data.observacoesInternas ?? '',
+    statusGeral: 'PENDING', statusCadastral: 'NOT_STARTED', statusDash: 'PENDING_REVIEW', statusFinanceiro: 'NO_CHARGE',
+    verifiedAt: null, verifiedBy: null, validatedAt: null, validatedBy: null, authUid: null,
+    createdAt: now, updatedAt: now,
+  };
+  await ref.set(supplier);
+  await addAuditLog({
+    eventId, userName: user.name, entityType: 'EXPOSITOR', entityId: ref.id, entityLabel: supplier.nomeFantasia,
+    action: 'EXPOSITOR_CRIADO', details: 'Expositor cadastrado manualmente pelo administrador.',
+  });
+
+  revalidatePath('/admin/expositores');
+  revalidatePath('/admin/dashboard');
+  return { ok: true };
+}
+
+export async function updateSupplierAdminAction(supplierId: string, raw: unknown): Promise<ActionResult> {
+  const user = await requireRole('SUPER_ADMIN');
+  const parsed = supplierAdminSchema.safeParse(raw);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Dados inválidos.' };
+  const data = parsed.data;
+
+  const existing = await getSupplierById(supplierId);
+  if (!existing) return { ok: false, error: 'Expositor não encontrado.' };
+
+  const dup = await findSupplierByCnpj(existing.eventId, data.cnpj, supplierId);
+  if (dup) return { ok: false, error: `Já existe um expositor com este CNPJ neste evento: ${dup.nomeFantasia}.` };
+
+  await adminDb().collection(COLLECTIONS.suppliers).doc(supplierId).update({
+    razaoSocial: data.razaoSocial, nomeFantasia: data.nomeFantasia, cnpj: data.cnpj,
+    inscricaoEstadual: data.inscricaoEstadual ?? '', endereco: data.endereco, responsavel: data.responsavel,
+    standNumero: data.standNumero, standLocalizacao: data.standLocalizacao ?? '', categoria: data.categoria,
+    observacoesInternas: data.observacoesInternas ?? '', standMetragem: data.standMetragem ?? 0,
+    updatedAt: new Date().toISOString(),
+  });
+  await addAuditLog({
+    eventId: existing.eventId, userName: user.name, entityType: 'EXPOSITOR', entityId: supplierId,
+    entityLabel: data.nomeFantasia, action: 'EXPOSITOR_EDITADO', details: 'Dados cadastrais atualizados pelo administrador.',
+  });
+
+  revalidatePath('/admin/expositores');
+  revalidatePath(`/admin/expositores/${supplierId}`);
+  return { ok: true };
+}
+
+export async function setSupplierActiveAction(supplierId: string, active: boolean): Promise<ActionResult> {
+  const user = await requireRole('SUPER_ADMIN');
+  const existing = await getSupplierById(supplierId);
+  if (!existing) return { ok: false, error: 'Expositor não encontrado.' };
+
+  await adminDb().collection(COLLECTIONS.suppliers).doc(supplierId).update({
+    statusGeral: active ? 'REGULAR' : 'INACTIVE',
+    updatedAt: new Date().toISOString(),
+  });
+  await addAuditLog({
+    eventId: existing.eventId, userName: user.name, entityType: 'EXPOSITOR', entityId: supplierId,
+    entityLabel: existing.nomeFantasia, action: 'STATUS_ALTERADO',
+    details: `Status geral alterado para ${active ? 'Regular' : 'Inativo'} (soft delete).`,
+  });
+  revalidatePath('/admin/expositores');
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------ */
+/* ADMIN: verificação / validação / correção de cadastro                */
+/* ------------------------------------------------------------------ */
+
+export async function verifySupplierAction(supplierId: string): Promise<ActionResult> {
+  const user = await requireRole('SUPER_ADMIN');
+  const existing = await getSupplierById(supplierId);
+  if (!existing) return { ok: false, error: 'Expositor não encontrado.' };
+  const now = new Date().toISOString();
+  await adminDb().collection(COLLECTIONS.suppliers).doc(supplierId).update({
+    statusDash: 'VERIFIED', statusCadastral: 'VERIFIED', verifiedAt: now, verifiedBy: user.name, updatedAt: now,
+  });
+  await addAuditLog({
+    eventId: existing.eventId, userName: user.name, entityType: 'EXPOSITOR', entityId: supplierId,
+    entityLabel: existing.nomeFantasia, action: 'VALIDACAO_REALIZADA', details: 'Cadastro marcado como verificado.',
+  });
+  revalidatePath(`/admin/expositores/${supplierId}`);
+  return { ok: true };
+}
+
+export async function validateSupplierAction(supplierId: string): Promise<ActionResult> {
+  const user = await requireRole('SUPER_ADMIN');
+  const existing = await getSupplierById(supplierId);
+  if (!existing) return { ok: false, error: 'Expositor não encontrado.' };
+  const now = new Date().toISOString();
+  await adminDb().collection(COLLECTIONS.suppliers).doc(supplierId).update({
+    statusDash: 'VALIDATED', statusCadastral: 'VALIDATED', statusGeral: 'REGULAR',
+    validatedAt: now, validatedBy: user.name, updatedAt: now,
+  });
+  await addAuditLog({
+    eventId: existing.eventId, userName: user.name, entityType: 'EXPOSITOR', entityId: supplierId,
+    entityLabel: existing.nomeFantasia, action: 'VALIDACAO_REALIZADA', details: 'Cadastro validado pela DASH.',
+  });
+  revalidatePath(`/admin/expositores/${supplierId}`);
+  return { ok: true };
+}
+
+export async function requestCorrectionAction(supplierId: string): Promise<ActionResult> {
+  const user = await requireRole('SUPER_ADMIN');
+  const existing = await getSupplierById(supplierId);
+  if (!existing) return { ok: false, error: 'Expositor não encontrado.' };
+  await adminDb().collection(COLLECTIONS.suppliers).doc(supplierId).update({
+    statusDash: 'REJECTED', statusCadastral: 'NEEDS_CORRECTION', updatedAt: new Date().toISOString(),
+  });
+  await addAuditLog({
+    eventId: existing.eventId, userName: user.name, entityType: 'EXPOSITOR', entityId: supplierId,
+    entityLabel: existing.nomeFantasia, action: 'STATUS_ALTERADO', details: 'Correção de cadastro solicitada ao expositor.',
+  });
+  revalidatePath(`/admin/expositores/${supplierId}`);
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------ */
+/* PORTAL: o próprio expositor edita seus dados                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Autoatendimento: o expositor autenticado edita seus próprios dados.
+ * A verificação de que ele só altera o PRÓPRIO registro acontece no
+ * servidor (user.supplierId), nunca confiando em um id vindo do cliente.
+ */
+export async function updateSupplierSelfAction(raw: unknown): Promise<ActionResult> {
+  const user = await getCurrentUser();
+  if (!user || user.role !== 'EXPOSITOR' || !user.supplierId) {
+    return { ok: false, error: 'Sessão inválida.' };
+  }
+  const parsed = supplierSelfEditSchema.safeParse(raw);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Dados inválidos.' };
+  const data = parsed.data;
+
+  const existing = await getSupplierById(user.supplierId);
+  if (!existing) return { ok: false, error: 'Expositor não encontrado.' };
+
+  const dup = await findSupplierByCnpj(existing.eventId, data.cnpj, user.supplierId);
+  if (dup) return { ok: false, error: 'Este CNPJ já está em uso por outro expositor neste evento.' };
+
+  // Preencher/editar avança automaticamente o status cadastral, mas nunca
+  // pula direto para "verificado" ou "validado" — isso é sempre feito
+  // manualmente pela equipe DASH (ver seção 13 da especificação).
+  const nextStatusCadastral = existing.statusCadastral === 'NOT_STARTED' ? 'IN_PROGRESS' : existing.statusCadastral;
+
+  await adminDb().collection(COLLECTIONS.suppliers).doc(user.supplierId).update({
+    razaoSocial: data.razaoSocial, nomeFantasia: data.nomeFantasia, cnpj: data.cnpj,
+    inscricaoEstadual: data.inscricaoEstadual ?? '', endereco: data.endereco, responsavel: data.responsavel,
+    standMetragem: data.standMetragem ?? existing.standMetragem ?? 0,
+    statusCadastral: nextStatusCadastral,
+    updatedAt: new Date().toISOString(),
+  });
+  await addAuditLog({
+    eventId: existing.eventId, userName: `${user.name} (expositor)`, entityType: 'EXPOSITOR', entityId: user.supplierId,
+    entityLabel: data.nomeFantasia, action: 'EXPOSITOR_EDITADO', details: 'Expositor atualizou os próprios dados cadastrais pelo portal.',
+  });
+
+  revalidatePath('/portal');
+  revalidatePath(`/admin/expositores/${user.supplierId}`);
+  return { ok: true };
+}
+
+/** Envio formal do cadastro para análise da DASH (Batch 2, seção "Envio para aprovação"). */
+export async function submitSupplierForReviewAction(): Promise<ActionResult> {
+  const user = await getCurrentUser();
+  if (!user || user.role !== 'EXPOSITOR' || !user.supplierId) return { ok: false, error: 'Sessão inválida.' };
+
+  const existing = await getSupplierById(user.supplierId);
+  if (!existing) return { ok: false, error: 'Expositor não encontrado.' };
+  if (existing.statusCadastral === 'NOT_STARTED') {
+    return { ok: false, error: 'Preencha os dados cadastrais antes de enviar para análise.' };
+  }
+
+  await adminDb().collection(COLLECTIONS.suppliers).doc(user.supplierId).update({
+    statusCadastral: 'SUBMITTED', statusDash: 'PENDING_REVIEW', updatedAt: new Date().toISOString(),
+  });
+  await addAuditLog({
+    eventId: existing.eventId, userName: `${user.name} (expositor)`, entityType: 'EXPOSITOR', entityId: user.supplierId,
+    entityLabel: existing.nomeFantasia, action: 'STATUS_ALTERADO', details: 'Expositor enviou o cadastro para análise da DASH.',
+  });
+
+  revalidatePath('/portal');
+  revalidatePath(`/admin/expositores/${user.supplierId}`);
+  return { ok: true };
+}

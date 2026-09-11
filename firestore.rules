@@ -1,0 +1,106 @@
+rules_version = '2';
+
+/**
+ * Regras de segurança do Firestore.
+ *
+ * A maior parte das leituras/escritas de negócio passa pelo Admin SDK
+ * no servidor (Server Actions e Route Handlers), que já ignora estas
+ * regras por definição — a autorização "de verdade" está no código do
+ * servidor (ver src/lib/auth/session.ts) e nunca depende só do frontend.
+ *
+ * Estas regras existem como segunda camada de defesa para o caso de o
+ * app também acessar o Firestore diretamente do cliente no futuro
+ * (ex.: leituras em tempo real) e para impedir qualquer acesso direto
+ * indevido feito fora do fluxo normal do app.
+ */
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function myProfile() {
+      return get(/databases/$(database)/documents/profiles/$(request.auth.uid));
+    }
+
+    function myRole() {
+      return isSignedIn() && myProfile() != null ? myProfile().data.role : null;
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && myRole() == 'SUPER_ADMIN';
+    }
+
+    function isExpositor() {
+      return isSignedIn() && myRole() == 'EXPOSITOR';
+    }
+
+    function ownsSupplier(supplierId) {
+      return isExpositor() && myProfile().data.supplierId == supplierId;
+    }
+
+    // Perfil: o próprio usuário pode ler o seu; só admin cria/edita perfis.
+    match /profiles/{uid} {
+      allow read: if isSignedIn() && (request.auth.uid == uid || isSuperAdmin());
+      allow write: if isSuperAdmin();
+    }
+
+    match /events/{eventId} {
+      allow read: if isSignedIn();
+      allow write: if isSuperAdmin();
+    }
+
+    match /categories/{id} {
+      allow read: if isSignedIn();
+      allow write: if isSuperAdmin();
+    }
+
+    match /suppliers/{supplierId} {
+      allow read: if isSuperAdmin() || ownsSupplier(supplierId);
+      // Escrita direta do cliente é bloqueada mesmo para o próprio expositor —
+      // ele só edita seus dados via Server Action (updateSupplierSelfAction),
+      // que valida com Zod e nunca deixa alterar código, status ou eventId.
+      allow write: if isSuperAdmin();
+    }
+
+    match /catalogItems/{itemId} {
+      allow read: if isSignedIn();
+      allow write: if isSuperAdmin();
+    }
+
+    match /orders/{orderId} {
+      allow read: if isSuperAdmin() || (isExpositor() && ownsSupplier(resource.data.supplierId));
+      allow write: if isSuperAdmin();
+    }
+
+    match /payments/{paymentId} {
+      allow read: if isSuperAdmin() || (isExpositor() && ownsSupplier(resource.data.supplierId));
+      allow write: if isSuperAdmin();
+    }
+
+    match /teamMembers/{memberId} {
+      allow read: if isSuperAdmin() || (isExpositor() && ownsSupplier(resource.data.supplierId));
+      allow write: if isSuperAdmin();
+    }
+
+    match /documents/{docId} {
+      allow read: if isSuperAdmin() || (isExpositor() && ownsSupplier(resource.data.supplierId));
+      allow write: if isSuperAdmin();
+    }
+
+    match /deadlines/{id} {
+      allow read: if isSignedIn();
+      allow write: if isSuperAdmin();
+    }
+
+    match /auditLogs/{id} {
+      allow read: if isSuperAdmin();
+      allow write: if isSuperAdmin();
+    }
+
+    match /catalogImports/{id} {
+      allow read, write: if isSuperAdmin();
+    }
+  }
+}

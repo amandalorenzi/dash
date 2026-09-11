@@ -1,0 +1,48 @@
+import { redirect } from 'next/navigation';
+import { getCurrentUser } from '@/lib/auth/session';
+import { getSupplierById } from '@/modules/suppliers/queries';
+import { getEventById } from '@/modules/events/queries';
+import { listOrdersBySupplier } from '@/modules/orders/queries';
+import { listPaymentsBySupplier } from '@/modules/payments/queries';
+import { listCatalogItemsByEvent } from '@/modules/catalog/queries';
+import { listTeamMembers } from '@/modules/team/actions';
+import { listDocuments } from '@/modules/documents/actions';
+import { listDeadlinesByEvent } from '@/modules/deadlines/queries';
+import { listAuditLogsForEntity } from '@/modules/audit/log';
+import { PortalClient } from '@/components/portal/PortalClient';
+
+export const dynamic = 'force-dynamic';
+
+export default async function PortalPage() {
+  const user = (await getCurrentUser())!;
+  if (!user.supplierId) redirect('/login');
+
+  const supplier = await getSupplierById(user.supplierId);
+  if (!supplier) redirect('/login');
+
+  const [event, orders, payments, catalogItems, team, documents, deadlines, auditLogs] = await Promise.all([
+    getEventById(supplier.eventId),
+    listOrdersBySupplier(supplier.id),
+    listPaymentsBySupplier(supplier.id),
+    listCatalogItemsByEvent(supplier.eventId),
+    listTeamMembers(supplier.id),
+    listDocuments(supplier.id),
+    listDeadlinesByEvent(supplier.eventId),
+    listAuditLogsForEntity(supplier.eventId, supplier.id),
+  ]);
+
+  return (
+    <PortalClient
+      userName={user.name}
+      eventName={event?.name ?? ''}
+      supplier={supplier}
+      orders={orders}
+      payments={payments}
+      catalogItems={catalogItems.filter((i) => i.active)}
+      team={team}
+      documents={documents}
+      deadlines={deadlines}
+      auditLogs={auditLogs}
+    />
+  );
+}
