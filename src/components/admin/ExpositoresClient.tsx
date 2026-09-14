@@ -7,7 +7,11 @@ import { StatusBadge, EmptyState } from '@/components/ui/Badge';
 import { Drawer, ConfirmModal } from '@/components/ui/Drawer';
 import { useToast } from '@/components/ui/useToast';
 import { STATUS_GERAL_LABEL, STATUS_CADASTRAL_LABEL, STATUS_DASH_LABEL, STATUS_FINANCEIRO_LABEL } from '@/config/labels';
-import { createSupplierAction, updateSupplierAdminAction, setSupplierActiveAction, resetSupplierPasswordAction } from '@/modules/suppliers/actions';
+import {
+  createSupplierAction, updateSupplierAdminAction, setSupplierActiveAction, resetSupplierPasswordAction,
+  deleteSupplierAction, getSupplierDeletionImpactAction, type SupplierDeletionImpact,
+} from '@/modules/suppliers/actions';
+import { fmtMoney } from '@/utils/format';
 import type { Supplier } from '@/types/domain';
 
 export function ExpositoresClient({ eventId, suppliers, categories }: { eventId: string; suppliers: Supplier[]; categories: string[] }) {
@@ -23,6 +27,11 @@ export function ExpositoresClient({ eventId, suppliers, categories }: { eventId:
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [credentials, setCredentials] = useState<{ email: string; tempPassword: string } | null>(null);
+  const [deleting, setDeleting] = useState<Supplier | null>(null);
+  const [impact, setImpact] = useState<SupplierDeletionImpact | null>(null);
+  const [confirmName, setConfirmName] = useState('');
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deletingBusy, setDeletingBusy] = useState(false);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -74,6 +83,23 @@ export function ExpositoresClient({ eventId, suppliers, categories }: { eventId:
     toast('Expositor cadastrado com sucesso.', 'success');
     setDrawerOpen(false);
     if (result.credentials) setCredentials(result.credentials);
+    router.refresh();
+  }
+
+  async function openDelete(s: Supplier) {
+    setDeleting(s); setConfirmName(''); setDeleteError(null); setImpact(null);
+    setImpact(await getSupplierDeletionImpactAction(s.id));
+  }
+
+  async function handleDelete() {
+    if (!deleting) return;
+    setDeletingBusy(true);
+    setDeleteError(null);
+    const result = await deleteSupplierAction(deleting.id, confirmName);
+    setDeletingBusy(false);
+    if (!result.ok) { setDeleteError(result.error); return; }
+    toast('Expositor excluído definitivamente.', 'success');
+    setDeleting(null);
     router.refresh();
   }
 
@@ -163,6 +189,9 @@ export function ExpositoresClient({ eventId, suppliers, categories }: { eventId:
                       )}
                       <button className="btn btn-ghost btn-sm" onClick={() => setConfirmTarget(s)}>
                         {s.statusGeral === 'INACTIVE' ? 'Reativar' : 'Desativar'}
+                      </button>
+                      <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => openDelete(s)}>
+                        Excluir
                       </button>
                     </div>
                   </td>
@@ -274,6 +303,54 @@ export function ExpositoresClient({ eventId, suppliers, categories }: { eventId:
         onCancel={() => setConfirmTarget(null)}
         onConfirm={handleToggleActive}
       />
+
+      {deleting && (
+        <div className="overlay open" onMouseDown={(e) => { if (e.target === e.currentTarget) setDeleting(null); }}>
+          <div className="modal" style={{ width: 520 }}>
+            <h3>Excluir expositor definitivamente</h3>
+            <p>
+              Esta ação <strong>não pode ser desfeita</strong>. Se você só quer tirar o expositor da operação
+              mantendo o histórico, use <strong>Desativar</strong>.
+            </p>
+
+            {impact === null ? (
+              <p className="text-sm text-muted">Verificando o que será removido...</p>
+            ) : (
+              <>
+                <p className="text-sm" style={{ marginBottom: 8 }}>Serão apagados junto:</p>
+                <ul className="checklist mb-16">
+                  <li>🗑 {impact.orders} pedido(s) com {impact.orderItems} item(ns) de extras</li>
+                  <li>🗑 {impact.payments} pagamento(s){impact.paidAmount > 0 ? ` — incluindo ${fmtMoney(impact.paidAmount)} já registrados como pagos` : ''}</li>
+                  <li>🗑 {impact.teamMembers} integrante(s) de equipe e {impact.documents} documento(s)</li>
+                  {impact.hasLogin && <li>🗑 O acesso ao portal deste expositor</li>}
+                </ul>
+                {impact.paidAmount > 0 && (
+                  <p className="text-sm" style={{ color: 'var(--danger)' }}>
+                    Atenção: há pagamento já confirmado no histórico deste expositor. Considere desativar em vez de excluir.
+                  </p>
+                )}
+                <div className="field mb-16">
+                  <label>Para confirmar, digite o nome fantasia: <strong>{deleting.nomeFantasia}</strong></label>
+                  <input value={confirmName} onChange={(e) => setConfirmName(e.target.value)} placeholder={deleting.nomeFantasia} />
+                </div>
+              </>
+            )}
+
+            {deleteError && <div className="login-error show">{deleteError}</div>}
+
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setDeleting(null)}>Cancelar</button>
+              <button
+                className="btn btn-danger"
+                disabled={deletingBusy || impact === null || confirmName.trim().toLowerCase() !== deleting.nomeFantasia.trim().toLowerCase()}
+                onClick={handleDelete}
+              >
+                {deletingBusy ? 'Excluindo...' : 'Excluir definitivamente'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

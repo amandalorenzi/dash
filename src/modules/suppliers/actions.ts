@@ -312,3 +312,98 @@ export async function submitSupplierForReviewAction(): Promise<ActionResult> {
   revalidatePath(`/admin/expositores/${user.supplierId}`);
   return { ok: true };
 }
+
+/* ------------------------------------------------------------------ */
+/* ADMIN: exclusão definitiva                                          */
+/* ------------------------------------------------------------------ */
+
+export interface SupplierDeletionImpact {
+  nomeFantasia: string;
+  orders: number;
+  orderItems: number;
+  payments: number;
+  paidAmount: number;
+  teamMembers: number;
+  documents: number;
+  hasLogin: boolean;
+}
+
+/**
+ * Levanta o que será perdido antes de excluir — a interface mostra isso na
+ * confirmação para a exclusão nunca ser uma surpresa. Desativar (soft delete)
+ * continua existindo e é a opção recomendada quando há histórico financeiro.
+ */
+export async function getSupplierDeletionImpactAction(supplierId: string): Promise<SupplierDeletionImpact | null> {
+  await requireRole('SUPER_ADMIN');
+  const supplier = await getSupplierById(supplierId);
+  if (!supplier) return null;
+
+  const [ordersSnap, paymentsSnap, teamSnap, docsSnap] = await Promise.all([
+    adminDb().collection(COLLECTIONS.orders).where('supplierId', '==', supplierId).get(),
+    adminDb().collection(COLLECTIONS.payments).where('supplierId', '==', supplierId).get(),
+    adminDb().collection(COLLECTIONS.teamMembers).where('supplierId', '==', supplierId).get(),
+    adminDb().collection(COLLECTIONS.documents).where('supplierId', '==', supplierId).get(),
+  ]);
+
+  const orders = ordersSnap.docs.map((d) => d.data() as { items?: unknown[] });
+  const payments = paymentsSnap.docs.map((d) => d.data() as { status: string; amount: number });
+
+  return {
+    nomeFantasia: supplier.nomeFantasia,
+    orders: ordersSnap.size,
+    orderItems: orders.reduce((sum, o) => sum + (o.items?.length ?? 0), 0),
+    payments: paymentsSnap.size,
+    paidAmount: payments.filter((p) => p.status === 'PAID').reduce((sum, p) => sum + (p.amount ?? 0), 0),
+    teamMembers: teamSnap.size,
+    documents: docsSnap.size,
+    hasLogin: Boolean(supplier.authUid),
+  };
+}
+
+/**
+ * Exclusão definitiva do expositor e de tudo que depende dele: pedidos,
+ * pagamentos, equipe, documentos, o usuário do Firebase Auth e o perfil.
+ *
+ * O log de auditoria é mantido de propósito — é o registro de que a exclusão
+ * aconteceu, e apagá-lo derrotaria o próprio propósito da auditoria.
+ *
+ * `confirmationName` precisa bater com o nome fantasia: evita exclusão por
+ * clique errado numa lista.
+ */
+export async function deleteSupplierAction(supplierId: string, confirmationName: string): Promise<ActionResult> {
+  const user = await requireRole('SUPER_ADMIN');
+  const supplier = await getSupplierById(supplierId);
+  if (!supplier) return { ok: false, error: 'Expositor não encontrado.' };
+
+  if (confirmationName.trim().toLowerCase() !== supplier.nomeFantasia.trim().toLowerCase()) {
+    return { ok: false, error: 'O nome digitado não confere com o nome fantasia do expositor.' };
+  }
+
+  const [ordersSnap, paymentsSnap, teamSnap, docsSnap] = await Promise.all([
+    adminDb().collection(COLLECTIONS.orders).where('supplierId', '==', supplierId).get(),
+    adminDb().collection(COLLECTIONS.payments).where('supplierId', '==', supplierId).get(),
+    adminDb().collection(COLLECTIONS.teamMembers).where('supplierId', '==', supplierId).get(),
+    adminDb().collection(COLLECTIONS.documents).where('supplierId', '==', supplierId).get(),
+  ]);
+
+  const batch = adminDb().batch();
+  [...ordersSnap.docs, ...paymentsSnap.docs, ...teamSnap.docs, ...docsSnap.docs].forEach((d) => batch.delete(d.ref));
+  if (supplier.authUid) batch.delete(adminDb().collection(COLLECTIONS.profiles).doc(supplier.authUid));
+  batch.delete(adminDb().collection(COLLECTIONS.suppliers).doc(supplierId));
+  await batch.commit();
+
+  if (supplier.authUid) {
+    // Se o usuário já tiver sido removido no console do Firebase, seguimos em frente.
+    try { await adminAuth().deleteUser(supplier.authUid); } catch { /* noop */ }
+  }
+
+  await addAuditLog({
+    eventId: supplier.eventId, userName: user.name, entityType: 'EXPOSITOR', entityId: supplierId,
+    entityLabel: supplier.nomeFantasia, action: 'EXPOSITOR_EXCLUIDO',
+    details: `Exclusão definitiva: ${ordersSnap.size} pedido(s), ${paymentsSnap.size} pagamento(s), ${teamSnap.size} integrante(s) e ${docsSnap.size} documento(s) removidos.`,
+  });
+
+  revalidatePath('/admin/expositores');
+  revalidatePath('/admin/dashboard');
+  return { ok: true };
+}
