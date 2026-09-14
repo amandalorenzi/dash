@@ -1,34 +1,54 @@
 # Changelog
 
-## v1.0.0 — Batch 1 + Batch 2 (Next.js + Firebase)
+## v1.1.0 — Configuração pela interface, eventos, usuários e updates
 
-Primeira versão real do sistema (banco de dados de verdade, autenticação real),
-substituindo o protótipo estático (MVP em HTML/CSS/JS puro) que serviu de base
-visual e de validação de navegação.
+Rodada focada no feedback de produção: nada mais depende de rodar script local.
+
+### Correções a partir do uso real
+- `firebase-admin` **fixado em 13.10.0** — a 14.x quebrava a criação do cookie de sessão.
+- **Nenhuma consulta usa mais `where` + `orderBy` combinados**: a ordenação passou a
+  ser feita em memória no servidor, eliminando a necessidade de criar índices
+  compostos manualmente no console do Firebase (causa dos erros em eventos,
+  expositores e categorias). `firestore.indexes.json` agora está vazio de propósito.
+- **Script de seed removido.** Todo o setup inicial é feito pela interface:
+  - `/setup` cria o primeiro administrador (a tela se desativa após o primeiro uso);
+  - criar um evento já cria as categorias iniciais automaticamente.
 
 ### Adicionado
-- Autenticação real via Firebase Auth (cookie de sessão httpOnly, verificado no servidor)
-- Dashboard administrativo com dados reais do Firestore
-- CRUD completo de expositores (renomeado de "fornecedor" em toda a interface)
-- Catálogo de itens com importação real de planilha XLSX/CSV (upload → validação → preview → confirmação)
-- Pedidos/extras com snapshot de preço e aprovação individual por item
-- Pagamentos com controle de status
-- Log de auditoria central
-- **Portal do expositor (Batch 2)**: o próprio expositor edita seu cadastro,
-  envia para análise, solicita extras, cadastra equipe, envia documentos,
-  consulta prazos, resumo financeiro, manual do expositor e histórico
-- Testes automatizados das regras financeiras críticas (Vitest)
-- Regras de segurança do Firestore + índices compostos
-- Script de seed idempotente
-- Documentação completa (arquitetura, banco de dados, importação, setup não-técnico)
+- **Eventos**: tela de criação/edição, seletor no topo, e configuração completa
+  (nome, datas, endereço, prazo final para pedidos, manual do expositor e
+  documentos compartilhados por link).
+- **Usuários e permissões**: criação de usuários da equipe DASH com papel
+  (SUPER_ADMIN, PRODUCAO, FINANCEIRO, OPERACIONAL), troca de papel, geração de
+  nova senha e remoção. Só SUPER_ADMIN acessa.
+- **Categorias**: tela para gerenciar categorias de expositor e de item separadamente.
+- **Updates do evento**: mural estilo feed — a equipe publica avisos no dashboard e
+  os expositores leem na aba "Updates do evento" do portal.
+- **Senha temporária**: ao criar expositor ou usuário, o sistema gera uma senha forte,
+  mostra **uma única vez**, marca `mustChangePassword: true` e força a troca no
+  primeiro acesso (`/change-password`). Botão "Gerar nova senha temporária" no admin.
+  Nada é enviado por e-mail/servidor.
+- **Prazo de pedidos**: quando o evento tem prazo definido, o portal bloqueia novas
+  solicitações — validado no servidor, não só escondendo o botão.
+- Manual do expositor e documentos compartilhados agora vêm da configuração do
+  evento (antes era conteúdo estático).
 
-### Simplificações conscientes desta versão
-Ver `docs/BATCH-01-DELIVERY.md`.
+### Alterado
+- Cadastro de expositor: **CNPJ e categoria deixaram de ser obrigatórios**.
+- Tela de login: removidas as instruções de primeiro acesso; "Supplier Management"
+  virou "Gestão de Expositores".
+- Testes: 16 no total (cálculo financeiro, snapshot de preço, regra de prazo e
+  geração de senha temporária).
+
+## v1.0.0 — Batch 1 + Batch 2 (Next.js + Firebase)
+
+Primeira versão real (banco e autenticação de verdade), substituindo o protótipo
+estático. Dashboard, expositores, catálogo com importação XLSX/CSV, pedidos com
+snapshot de preço, pagamentos, auditoria, portal do expositor, regras do Firestore
+e testes das regras financeiras.
 
 ## v0.2.0 — MVP estático (HTML/CSS/JS)
-
-Protótipo funcional sem backend, usado para validar navegação, login e
-identidade visual antes da implementação real.
+Protótipo funcional sem backend, para validar navegação, login e identidade visual.
 
 ## v0.1.0 — Especificação inicial
-Documento de requisitos da Batch 1 (Supabase/Postgres) recebido do time DASH.
+Documento de requisitos da Batch 1 recebido do time DASH.

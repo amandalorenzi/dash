@@ -4,6 +4,7 @@
  */
 export const COLLECTIONS = {
   events: 'events',
+  eventUpdates: 'eventUpdates',
   categories: 'categories',
   suppliers: 'suppliers',
   catalogItems: 'catalogItems',

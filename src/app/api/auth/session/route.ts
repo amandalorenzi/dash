@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
     const sessionCookie = await adminAuth().createSessionCookie(idToken, { expiresIn: SESSION_MAX_AGE_MS });
     const profile = profileSnap.data();
 
-    const response = NextResponse.json({ role: profile?.role ?? null });
+    const response = NextResponse.json({ role: profile?.role ?? null, mustChangePassword: Boolean(profile?.mustChangePassword) });
     response.cookies.set(SESSION_COOKIE_NAME, sessionCookie, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',

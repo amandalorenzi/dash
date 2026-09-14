@@ -7,9 +7,13 @@ export async function listSuppliersByEvent(eventId: string): Promise<Supplier[]>
   const snap = await adminDb()
     .collection(COLLECTIONS.suppliers)
     .where('eventId', '==', eventId)
-    .orderBy('createdAt', 'desc')
     .get();
-  return snap.docs.map((d) => d.data() as Supplier);
+  // Ordenação feita em memória de propósito: combinar where + orderBy no
+  // Firestore exigiria criar um índice composto manualmente no console,
+  // o que já causou erro em produção. O volume por evento é pequeno.
+  return snap.docs
+    .map((d) => d.data() as Supplier)
+    .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
 }
 
 export async function getSupplierById(id: string): Promise<Supplier | null> {

@@ -14,8 +14,10 @@ export async function listAuditLogsForEntity(eventId: string, entityId: string, 
     .collection(COLLECTIONS.auditLogs)
     .where('eventId', '==', eventId)
     .where('entityId', '==', entityId)
-    .orderBy('createdAt', 'desc')
-    .limit(limit)
     .get();
-  return snap.docs.map((d) => d.data() as AuditLog);
+  // Ordenação e corte em memória — evita exigir índice composto no Firestore.
+  return snap.docs
+    .map((d) => d.data() as AuditLog)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, limit);
 }

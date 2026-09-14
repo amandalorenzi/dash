@@ -68,6 +68,14 @@ export async function requestOrderItemAction(catalogItemId: string, quantity: nu
   const supplier = await getSupplierById(user.supplierId);
   if (!supplier) return { ok: false, error: 'Expositor não encontrado.' };
 
+  // O prazo é validado aqui no servidor, não só escondendo o botão na tela:
+  // desabilitar um botão no cliente nunca é uma barreira de verdade.
+  const eventSnap = await adminDb().collection(COLLECTIONS.events).doc(supplier.eventId).get();
+  const orderDeadline = (eventSnap.data() as { orderDeadline?: string | null } | undefined)?.orderDeadline;
+  if (orderDeadline && new Date().toISOString().slice(0, 10) > orderDeadline) {
+    return { ok: false, error: 'O prazo para solicitar novos extras já encerrou. Fale com a produção da DASH.' };
+  }
+
   const itemDoc = await adminDb().collection(COLLECTIONS.catalogItems).doc(catalogItemId).get();
   if (!itemDoc.exists || !(itemDoc.data() as CatalogItem).active) return { ok: false, error: 'Item indisponível.' };
   const catalogItem = itemDoc.data() as CatalogItem;

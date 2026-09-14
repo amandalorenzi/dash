@@ -17,10 +17,12 @@ import { updateSupplierSelfAction, submitSupplierForReviewAction } from '@/modul
 import { requestOrderItemAction } from '@/modules/orders/actions';
 import { addTeamMemberAction, removeTeamMemberAction } from '@/modules/team/actions';
 import { addDocumentAction } from '@/modules/documents/actions';
-import type { Supplier, SupplierOrder, Payment, CatalogItem, TeamMember, SupplierDocument, Deadline, AuditLog } from '@/types/domain';
+import { EventUpdatesFeed } from '@/components/shared/EventUpdatesFeed';
+import type { Supplier, SupplierOrder, Payment, CatalogItem, TeamMember, SupplierDocument, Deadline, AuditLog, FirestoreEvent, EventUpdate } from '@/types/domain';
 
 const TABS = [
   { key: 'geral', label: 'Visão geral' },
+  { key: 'updates', label: 'Updates do evento' },
   { key: 'cadastro', label: 'Cadastro' },
   { key: 'extras', label: 'Extras' },
   { key: 'equipe', label: 'Equipe' },
@@ -31,8 +33,9 @@ const TABS = [
   { key: 'historico', label: 'Histórico' },
 ];
 
-export function PortalClient({ userName, eventName, supplier, orders, payments, catalogItems, team, documents, deadlines, auditLogs }: {
-  userName: string; eventName: string; supplier: Supplier; orders: SupplierOrder[]; payments: Payment[];
+export function PortalClient({ userName, eventName, event, updates, supplier, orders, payments, catalogItems, team, documents, deadlines, auditLogs }: {
+  userName: string; eventName: string; event: FirestoreEvent | null; updates: EventUpdate[];
+  supplier: Supplier; orders: SupplierOrder[]; payments: Payment[];
   catalogItems: CatalogItem[]; team: TeamMember[]; documents: SupplierDocument[]; deadlines: Deadline[]; auditLogs: AuditLog[];
 }) {
   const router = useRouter();
@@ -75,13 +78,14 @@ export function PortalClient({ userName, eventName, supplier, orders, payments, 
         </div>
 
         {tab === 'geral' && <PortalGeral supplier={supplier} balance={balance} orders={orders} />}
+        {tab === 'updates' && <EventUpdatesFeed eventId={supplier.eventId} updates={updates} canPublish={false} />}
         {tab === 'cadastro' && <PortalCadastro supplier={supplier} toast={toast} refresh={refresh} />}
-        {tab === 'extras' && <PortalExtras orders={orders} catalogItems={catalogItems} toast={toast} refresh={refresh} />}
+        {tab === 'extras' && <PortalExtras orders={orders} catalogItems={catalogItems} orderDeadline={event?.orderDeadline ?? null} toast={toast} refresh={refresh} />}
         {tab === 'equipe' && <PortalEquipe supplier={supplier} team={team} toast={toast} refresh={refresh} />}
         {tab === 'documentos' && <PortalDocumentos supplier={supplier} documents={documents} toast={toast} refresh={refresh} />}
         {tab === 'financeiro' && <PortalFinanceiro balance={balance} payments={payments} />}
         {tab === 'prazos' && <PortalPrazos deadlines={deadlines} />}
-        {tab === 'manual' && <PortalManual />}
+        {tab === 'manual' && <PortalManual event={event} />}
         {tab === 'historico' && <PortalHistorico auditLogs={auditLogs} />}
       </div>
 
@@ -211,10 +215,16 @@ function PortalCadastro({ supplier, toast, refresh }: { supplier: Supplier; toas
 }
 
 /* -------------------------------- EXTRAS ----------------------------------- */
-function PortalExtras({ orders, catalogItems, toast, refresh }: { orders: SupplierOrder[]; catalogItems: CatalogItem[]; toast: (m: string, t?: 'success' | 'error') => void; refresh: () => void }) {
+function PortalExtras({ orders, catalogItems, orderDeadline, toast, refresh }: {
+  orders: SupplierOrder[]; catalogItems: CatalogItem[]; orderDeadline: string | null;
+  toast: (m: string, t?: 'success' | 'error') => void; refresh: () => void;
+}) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const items = orders.flatMap((o) => o.items);
+
+  // Compara só a data (sem hora) para o prazo valer até o fim do dia informado.
+  const deadlinePassed = Boolean(orderDeadline && new Date().toISOString().slice(0, 10) > orderDeadline);
 
   async function handleRequest(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -232,8 +242,13 @@ function PortalExtras({ orders, catalogItems, toast, refresh }: { orders: Suppli
     <div className="table-wrap">
       <div className="table-toolbar">
         <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: 15 }}>Meus extras solicitados</h3>
-        <button className="btn btn-primary btn-sm" onClick={() => setDrawerOpen(true)}>+ Solicitar item extra</button>
+        <button className="btn btn-primary btn-sm" onClick={() => setDrawerOpen(true)} disabled={deadlinePassed}>+ Solicitar item extra</button>
       </div>
+      {deadlinePassed && (
+        <div style={{ padding: '12px 18px', background: 'var(--warning-bg)', color: '#8A5A0F', fontSize: 13 }}>
+          O prazo para solicitar novos extras encerrou em {fmtDateShort(orderDeadline)}. Fale com a produção da DASH se precisar de algo adicional.
+        </div>
+      )}
       <div className="table-scroll">
         <table className="data-table">
           <thead><tr><th>Item</th><th>Qtd.</th><th>Total</th><th>Status</th></tr></thead>
@@ -416,18 +431,36 @@ function PortalPrazos({ deadlines }: { deadlines: Deadline[] }) {
 }
 
 /* --------------------------- MANUAL DO EXPOSITOR -------------------------------- */
-function PortalManual() {
+function PortalManual({ event }: { event: FirestoreEvent | null }) {
+  const docs = event?.sharedDocuments ?? [];
   return (
-    <div className="card">
-      <div className="card-header"><h3>Manual do expositor</h3></div>
-      <div className="card-body flex-col gap-16">
-        <p className="text-secondary text-sm">Orientações gerais para montagem, desmontagem e participação no evento.</p>
-        <ul className="checklist">
-          <li className="ok">✅ Horários de montagem e desmontagem serão informados pela produção.</li>
-          <li className="ok">✅ Itens extras contratados devem ser retirados/instalados conforme cronograma do evento.</li>
-          <li className="ok">✅ Em caso de dúvidas, utilize os contatos informados no seu e-mail de confirmação.</li>
-        </ul>
-        <p className="text-sm text-muted">Nesta versão o manual é um conteúdo estático. Uma versão futura poderá permitir upload de um PDF por evento (Firebase Storage).</p>
+    <div className="flex-col gap-16">
+      <div className="card">
+        <div className="card-header"><h3>Manual do expositor</h3></div>
+        <div className="card-body">
+          {event?.guideContent ? (
+            <p style={{ margin: 0, fontSize: 13.5, whiteSpace: 'pre-wrap' }}>{event.guideContent}</p>
+          ) : (
+            <EmptyState icon="📘" title="Manual ainda não publicado" text="A produção da DASH ainda não publicou o manual deste evento." />
+          )}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header"><h3>Documentos compartilhados pela DASH</h3></div>
+        <div className="card-body">
+          {docs.length === 0 ? (
+            <EmptyState icon="📎" title="Nenhum documento disponível" text="Quando a produção compartilhar documentos, eles aparecerão aqui." />
+          ) : (
+            <ul className="checklist">
+              {docs.map((d) => (
+                <li key={d.id} className="ok">
+                  📎 <a href={d.url} target="_blank" rel="noopener noreferrer">{d.name}</a>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
     </div>
   );

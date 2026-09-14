@@ -2,6 +2,11 @@ import { z } from 'zod';
 
 const cnpjPattern = /^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/;
 
+const optionalCnpj = z.string().trim().optional().refine(
+  (v) => !v || cnpjPattern.test(v),
+  { message: 'CNPJ inválido. Use o formato 00.000.000/0000-00 (ou deixe em branco).' },
+).transform((v) => v ?? '');
+
 export const addressSchema = z.object({
   logradouro: z.string().default(''),
   numero: z.string().default(''),
@@ -28,7 +33,7 @@ export const responsavelSchema = z.object({
 export const supplierSelfEditSchema = z.object({
   razaoSocial: z.string().min(2, 'Informe a razão social.'),
   nomeFantasia: z.string().min(2, 'Informe o nome fantasia.'),
-  cnpj: z.string().regex(cnpjPattern, 'CNPJ inválido. Use o formato 00.000.000/0000-00.'),
+  cnpj: optionalCnpj,
   inscricaoEstadual: z.string().optional(),
   endereco: addressSchema,
   responsavel: responsavelSchema,
@@ -40,7 +45,7 @@ export type SupplierSelfEditInput = z.infer<typeof supplierSelfEditSchema>;
 export const supplierAdminSchema = supplierSelfEditSchema.extend({
   standNumero: z.string().min(1, 'Informe o número do stand.'),
   standLocalizacao: z.string().optional(),
-  categoria: z.string().min(1, 'Selecione uma categoria.'),
+  categoria: z.string().optional().transform((v) => v ?? ''),
   observacoesInternas: z.string().optional(),
 });
 export type SupplierAdminInput = z.infer<typeof supplierAdminSchema>;

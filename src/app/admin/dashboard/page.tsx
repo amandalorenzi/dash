@@ -4,6 +4,8 @@ import { getEventById } from '@/modules/events/queries';
 import { listSuppliersByEvent, suppliersNeedingAttention } from '@/modules/suppliers/queries';
 import { listOrdersByEvent } from '@/modules/orders/queries';
 import { listPaymentsByEvent } from '@/modules/payments/queries';
+import { listEventUpdates } from '@/modules/events/queries';
+import { EventUpdatesFeed } from '@/components/shared/EventUpdatesFeed';
 import { calculateOrderTotal, calculateOrderApprovedTotal, calculateSupplierBalance } from '@/modules/orders/calculations';
 import { AppShell } from '@/components/layout/AppShell';
 import { StatusBadge, EmptyState } from '@/components/ui/Badge';
@@ -20,16 +22,20 @@ export default async function DashboardPage() {
   if (!eventId) {
     return (
       <AppShell active="dashboard" user={user}>
-        <EmptyState icon="📅" title="Nenhum evento cadastrado" text="Cadastre um evento no Firestore (coleção events) para começar a usar o painel." />
+        <EmptyState icon="📅" title="Nenhum evento cadastrado" text="Crie o primeiro evento para começar. As categorias iniciais são criadas junto, automaticamente." />
+        <div style={{ textAlign: 'center' }}>
+          <Link href="/admin/eventos" className="btn btn-primary">Criar primeiro evento</Link>
+        </div>
       </AppShell>
     );
   }
 
-  const [event, suppliers, orders, payments] = await Promise.all([
+  const [event, suppliers, orders, payments, updates] = await Promise.all([
     getEventById(eventId),
     listSuppliersByEvent(eventId),
     listOrdersByEvent(eventId),
     listPaymentsByEvent(eventId),
+    listEventUpdates(eventId),
   ]);
 
   const cadastrosPendentes = suppliers.filter((s) => ['NOT_STARTED', 'IN_PROGRESS', 'NEEDS_CORRECTION'].includes(s.statusCadastral)).length;
@@ -74,6 +80,10 @@ export default async function DashboardPage() {
             <div className="hint">{c.hint}</div>
           </div>
         ))}
+      </div>
+
+      <div className="mb-16">
+        <EventUpdatesFeed eventId={eventId} updates={updates} canPublish canDelete />
       </div>
 
       <div className="table-wrap">

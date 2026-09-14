@@ -32,6 +32,21 @@ export interface FirestoreEvent {
   local: string;
   dataInicio: string;
   dataFim: string;
+  endereco?: Address;
+  /** Prazo final para envio de solicitações de extras. */
+  orderDeadline?: string | null;
+  /** Conteúdo do "Manual do expositor" deste evento, editável pelo admin. */
+  guideContent?: string;
+  /** Documentos/links compartilhados pela DASH, visíveis ao expositor. */
+  sharedDocuments?: { id: string; name: string; url: string }[];
+  createdAt: string;
+}
+
+export interface EventUpdate {
+  id: string;
+  eventId: string;
+  authorName: string;
+  message: string;
   createdAt: string;
 }
 
@@ -197,6 +212,8 @@ export interface UserProfile {
   /** Preenchido apenas para role EXPOSITOR: vincula ao registro do expositor. */
   supplierId?: string | null;
   eventId?: string | null;
+  /** true logo após criação/reset de senha pelo admin — força troca no próximo login. */
+  mustChangePassword?: boolean;
   createdAt: string;
 }
 

@@ -11,7 +11,7 @@ import {
   ORDER_STATUS_LABEL, APPROVAL_STATUS_LABEL, BILLING_UNIT_LABEL, PAYMENT_STATUS_LABEL, DOCUMENT_STATUS_LABEL,
 } from '@/config/labels';
 import { calculateSupplierBalance, calculateOrderItemTotal } from '@/modules/orders/calculations';
-import { verifySupplierAction, validateSupplierAction, requestCorrectionAction } from '@/modules/suppliers/actions';
+import { verifySupplierAction, validateSupplierAction, requestCorrectionAction, resetSupplierPasswordAction } from '@/modules/suppliers/actions';
 import { addManualOrderItemAction, approveOrderItemAction } from '@/modules/orders/actions';
 import { registerPaymentAction, updatePaymentStatusAction } from '@/modules/payments/actions';
 import { addTeamMemberAction, removeTeamMemberAction } from '@/modules/team/actions';
@@ -110,12 +110,24 @@ function TabGeral({ supplier, orders, balance }: { supplier: Supplier; orders: S
 /* ------------------------------- CADASTRO --------------------------------- */
 function TabCadastro({ supplier, toast, refresh }: { supplier: Supplier; toast: (m: string, t?: 'success' | 'error') => void; refresh: () => void }) {
   const [busy, setBusy] = useState(false);
+  const [credentials, setCredentials] = useState<{ email: string; tempPassword: string } | null>(null);
+
   async function run(action: () => Promise<{ ok: boolean; error?: string }>, okMsg: string) {
     setBusy(true);
     const res = await action();
     setBusy(false);
     if (!res.ok) { toast(res.error ?? 'Erro.', 'error'); return; }
     toast(okMsg, 'success');
+    refresh();
+  }
+
+  async function handleResetPassword() {
+    setBusy(true);
+    const res = await resetSupplierPasswordAction(supplier.id);
+    setBusy(false);
+    if (!res.ok) { toast(res.error, 'error'); return; }
+    if (res.credentials) setCredentials(res.credentials);
+    toast('Nova senha temporária gerada.', 'success');
     refresh();
   }
 
@@ -159,6 +171,36 @@ function TabCadastro({ supplier, toast, refresh }: { supplier: Supplier; toast: 
           </div>
         </div>
       </div>
+
+      <div className="card mt-16">
+        <div className="card-header"><h3>Acesso ao portal</h3></div>
+        <div className="card-body">
+          <div className="form-grid mb-16">
+            <div className="field"><label>E-mail de login</label><div>{supplier.responsavel.email || '—'}</div></div>
+            <div className="field"><label>Situação</label>
+              <div>{supplier.authUid ? <Badge label="Acesso ativo" tone="success" /> : <Badge label="Sem acesso criado" tone="neutral" />}</div>
+            </div>
+          </div>
+          <button className="btn btn-secondary" disabled={busy || !supplier.responsavel.email} onClick={handleResetPassword}>
+            {supplier.authUid ? 'Gerar nova senha temporária' : 'Criar acesso ao portal'}
+          </button>
+          <p className="text-sm text-muted mt-8">
+            A senha é mostrada uma única vez, logo após ser gerada. O expositor será obrigado a trocá-la no primeiro acesso.
+          </p>
+        </div>
+      </div>
+
+      {credentials && (
+        <div className="overlay open" onMouseDown={(e) => { if (e.target === e.currentTarget) setCredentials(null); }}>
+          <div className="modal">
+            <h3>Acesso gerado</h3>
+            <p>Copie agora — a senha não será mostrada novamente. Repasse ao expositor por fora do sistema.</p>
+            <div className="field mb-16"><label>E-mail</label><input readOnly value={credentials.email} onFocus={(e) => e.target.select()} /></div>
+            <div className="field mb-16"><label>Senha temporária</label><input readOnly value={credentials.tempPassword} onFocus={(e) => e.target.select()} /></div>
+            <div className="modal-actions"><button className="btn btn-primary" onClick={() => setCredentials(null)}>Já copiei, fechar</button></div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

@@ -11,6 +11,12 @@ const NAV_ITEMS = [
   { key: 'catalogo', href: '/admin/catalogo', icon: '▤', label: 'Catálogo de itens' },
 ];
 
+const CONFIG_ITEMS = [
+  { key: 'eventos', href: '/admin/eventos', icon: '📅', label: 'Eventos' },
+  { key: 'categorias', href: '/admin/categorias', icon: '🗂', label: 'Categorias' },
+  { key: 'usuarios', href: '/admin/usuarios', icon: '👤', label: 'Usuários' },
+];
+
 export async function AppShell({ active, user, children }: { active: string; user: UserProfile; children: React.ReactNode }) {
   const events = await listEvents();
   const currentEventId = await getCurrentEventId();
@@ -21,7 +27,7 @@ export async function AppShell({ active, user, children }: { active: string; use
         <div className="sidebar-brand">
           <div>
             <strong>dash<span className="logo-dot">.</span></strong>
-            <span>SUPPLIER MANAGEMENT</span>
+            <span>GESTÃO DE EXPOSITORES</span>
           </div>
         </div>
         <nav className="sidebar-nav">
@@ -31,9 +37,15 @@ export async function AppShell({ active, user, children }: { active: string; use
               <span className="ic">{item.icon}</span> {item.label}
             </Link>
           ))}
+          <div className="sidebar-section-label">Configurações</div>
+          {CONFIG_ITEMS.map((item) => (
+            <Link key={item.key} href={item.href} className={`nav-item ${active === item.key ? 'active' : ''}`}>
+              <span className="ic">{item.icon}</span> {item.label}
+            </Link>
+          ))}
         </nav>
         <div className="sidebar-footer">
-          DASH Supplier Management · Batch 1 + 2<br />
+          DASH · Gestão de Expositores<br />
           v1.0.0 · Firebase + Vercel
         </div>
       </div>

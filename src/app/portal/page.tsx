@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth/session';
 import { getSupplierById } from '@/modules/suppliers/queries';
-import { getEventById } from '@/modules/events/queries';
+import { getEventById, listEventUpdates } from '@/modules/events/queries';
 import { listOrdersBySupplier } from '@/modules/orders/queries';
 import { listPaymentsBySupplier } from '@/modules/payments/queries';
 import { listCatalogItemsByEvent } from '@/modules/catalog/queries';
@@ -20,8 +20,9 @@ export default async function PortalPage() {
   const supplier = await getSupplierById(user.supplierId);
   if (!supplier) redirect('/login');
 
-  const [event, orders, payments, catalogItems, team, documents, deadlines, auditLogs] = await Promise.all([
+  const [event, updates, orders, payments, catalogItems, team, documents, deadlines, auditLogs] = await Promise.all([
     getEventById(supplier.eventId),
+    listEventUpdates(supplier.eventId),
     listOrdersBySupplier(supplier.id),
     listPaymentsBySupplier(supplier.id),
     listCatalogItemsByEvent(supplier.eventId),
@@ -35,6 +36,8 @@ export default async function PortalPage() {
     <PortalClient
       userName={user.name}
       eventName={event?.name ?? ''}
+      event={event}
+      updates={updates}
       supplier={supplier}
       orders={orders}
       payments={payments}

@@ -7,9 +7,11 @@ export async function listCatalogItemsByEvent(eventId: string): Promise<CatalogI
   const snap = await adminDb()
     .collection(COLLECTIONS.catalogItems)
     .where('eventId', '==', eventId)
-    .orderBy('code', 'asc')
     .get();
-  return snap.docs.map((d) => d.data() as CatalogItem);
+  // Ordenação em memória — evita exigir índice composto no Firestore.
+  return snap.docs
+    .map((d) => d.data() as CatalogItem)
+    .sort((a, b) => a.code.localeCompare(b.code));
 }
 
 export async function findCatalogItemByCode(eventId: string, code: string, excludeId?: string): Promise<CatalogItem | null> {

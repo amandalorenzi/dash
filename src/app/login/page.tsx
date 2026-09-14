@@ -35,7 +35,7 @@ export default function LoginPage() {
         return;
       }
 
-      router.push(data.role === 'EXPOSITOR' ? '/portal' : '/admin/dashboard');
+      router.push(data.mustChangePassword ? '/change-password' : data.role === 'EXPOSITOR' ? '/portal' : '/admin/dashboard');
       router.refresh();
     } catch {
       setError('E-mail ou senha inválidos.');
@@ -48,7 +48,7 @@ export default function LoginPage() {
       <div className="login-brand">
         <div>
           <div className="brand-mark">dash<span className="dot">.</span></div>
-          <div className="brand-sub">SUPPLIER MANAGEMENT</div>
+          <div className="brand-sub">GESTÃO DE EXPOSITORES</div>
         </div>
         <div className="headline">
           <h2>Gestão de expositores em um só lugar.</h2>
@@ -81,15 +81,6 @@ export default function LoginPage() {
               {loading ? 'Entrando...' : 'Entrar'}
             </button>
           </form>
-
-          <div className="demo-box">
-            <p>Primeiro acesso?</p>
-            <p className="text-sm text-muted" style={{ margin: 0 }}>
-              Crie o usuário administrador no Firebase Authentication e o respectivo perfil na coleção
-              <code> profiles</code> seguindo o guia <code>docs/SETUP-PASSO-A-PASSO.md</code>. Não há login de demonstração
-              embutido nesta versão — os dados são reais, vindos do seu projeto Firebase.
-            </p>
-          </div>
         </div>
       </div>
     </div>

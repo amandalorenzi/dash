@@ -51,6 +51,13 @@ service cloud.firestore {
       allow write: if isSuperAdmin();
     }
 
+    match /eventUpdates/{id} {
+      // Comunicados são visíveis a todos os autenticados do evento;
+      // a escrita passa pelo servidor (Server Action com checagem de papel).
+      allow read: if isSignedIn();
+      allow write: if isSuperAdmin();
+    }
+
     match /categories/{id} {
       allow read: if isSignedIn();
       allow write: if isSuperAdmin();

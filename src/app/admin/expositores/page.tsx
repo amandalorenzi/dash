@@ -13,10 +13,10 @@ export default async function ExpositoresPage() {
   const eventId = await getCurrentEventId();
 
   if (!eventId) {
-    return <AppShell active="expositores" user={user}><EmptyState icon="📅" title="Nenhum evento" text="Cadastre um evento primeiro." /></AppShell>;
+    return <AppShell active="expositores" user={user}><EmptyState icon="📅" title="Nenhum evento" text="Crie um evento em Configurações → Eventos antes de usar esta tela." /></AppShell>;
   }
 
-  const [suppliers, categories] = await Promise.all([listSuppliersByEvent(eventId), listCategories(eventId)]);
+  const [suppliers, categories] = await Promise.all([listSuppliersByEvent(eventId), listCategories(eventId, 'SUPPLIER')]);
 
   return (
     <AppShell active="expositores" user={user}>

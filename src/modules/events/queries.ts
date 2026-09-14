@@ -1,11 +1,13 @@
 import 'server-only';
 import { adminDb } from '@/lib/firebase/admin';
 import { COLLECTIONS } from '@/config/firestore-collections';
-import type { FirestoreEvent } from '@/types/domain';
+import type { FirestoreEvent, EventUpdate } from '@/types/domain';
 
 export async function listEvents(): Promise<FirestoreEvent[]> {
-  const snap = await adminDb().collection(COLLECTIONS.events).orderBy('dataInicio', 'desc').get();
-  return snap.docs.map((d) => d.data() as FirestoreEvent);
+  const snap = await adminDb().collection(COLLECTIONS.events).get();
+  const rows = snap.docs.map((d) => d.data() as FirestoreEvent);
+  // ordenação em memória evita exigir índice composto no Firestore
+  return rows.sort((a, b) => (b.dataInicio ?? '').localeCompare(a.dataInicio ?? ''));
 }
 
 export async function getEventById(id: string): Promise<FirestoreEvent | null> {
@@ -13,9 +15,13 @@ export async function getEventById(id: string): Promise<FirestoreEvent | null> {
   return doc.exists ? (doc.data() as FirestoreEvent) : null;
 }
 
-/** Evento "atual" nesta primeira versão: o mais recente por data de início.
- *  Preparado para evoluir para uma preferência por admin sem mudar o resto do app. */
 export async function getCurrentEvent(): Promise<FirestoreEvent | null> {
   const events = await listEvents();
   return events[0] ?? null;
+}
+
+export async function listEventUpdates(eventId: string, limit = 50): Promise<EventUpdate[]> {
+  const snap = await adminDb().collection(COLLECTIONS.eventUpdates).where('eventId', '==', eventId).get();
+  const rows = snap.docs.map((d) => d.data() as EventUpdate);
+  return rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit);
 }

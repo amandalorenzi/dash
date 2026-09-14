@@ -7,7 +7,7 @@ import { StatusBadge, EmptyState } from '@/components/ui/Badge';
 import { Drawer, ConfirmModal } from '@/components/ui/Drawer';
 import { useToast } from '@/components/ui/useToast';
 import { STATUS_GERAL_LABEL, STATUS_CADASTRAL_LABEL, STATUS_DASH_LABEL, STATUS_FINANCEIRO_LABEL } from '@/config/labels';
-import { createSupplierAction, updateSupplierAdminAction, setSupplierActiveAction } from '@/modules/suppliers/actions';
+import { createSupplierAction, updateSupplierAdminAction, setSupplierActiveAction, resetSupplierPasswordAction } from '@/modules/suppliers/actions';
 import type { Supplier } from '@/types/domain';
 
 export function ExpositoresClient({ eventId, suppliers, categories }: { eventId: string; suppliers: Supplier[]; categories: string[] }) {
@@ -22,6 +22,7 @@ export function ExpositoresClient({ eventId, suppliers, categories }: { eventId:
   const [confirmTarget, setConfirmTarget] = useState<Supplier | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [credentials, setCredentials] = useState<{ email: string; tempPassword: string } | null>(null);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -57,14 +58,30 @@ export function ExpositoresClient({ eventId, suppliers, categories }: { eventId:
       observacoesInternas: String(fd.get('observacoesInternas') || ''),
     };
 
-    const result = editing
-      ? await updateSupplierAdminAction(editing.id, payload)
-      : await createSupplierAction(eventId, payload);
+    if (editing) {
+      const result = await updateSupplierAdminAction(editing.id, payload);
+      setSaving(false);
+      if (!result.ok) { setFormError(result.error); return; }
+      toast('Expositor atualizado com sucesso.', 'success');
+      setDrawerOpen(false);
+      router.refresh();
+      return;
+    }
 
+    const result = await createSupplierAction(eventId, payload, String(fd.get('loginEmail') || ''));
     setSaving(false);
     if (!result.ok) { setFormError(result.error); return; }
-    toast(editing ? 'Expositor atualizado com sucesso.' : 'Expositor cadastrado com sucesso.', 'success');
+    toast('Expositor cadastrado com sucesso.', 'success');
     setDrawerOpen(false);
+    if (result.credentials) setCredentials(result.credentials);
+    router.refresh();
+  }
+
+  async function handleResetPassword(s: Supplier) {
+    const result = await resetSupplierPasswordAction(s.id);
+    if (!result.ok) { toast(result.error, 'error'); return; }
+    if (result.credentials) setCredentials(result.credentials);
+    toast('Nova senha temporária gerada.', 'success');
     router.refresh();
   }
 
@@ -139,6 +156,11 @@ export function ExpositoresClient({ eventId, suppliers, categories }: { eventId:
                   <td>
                     <div className="row-actions">
                       <button className="btn btn-ghost btn-sm" onClick={() => openEdit(s)}>Editar</button>
+                      {s.responsavel.email && (
+                        <button className="btn btn-ghost btn-sm" onClick={() => handleResetPassword(s)}>
+                          {s.authUid ? 'Gerar nova senha' : 'Criar acesso'}
+                        </button>
+                      )}
                       <button className="btn btn-ghost btn-sm" onClick={() => setConfirmTarget(s)}>
                         {s.statusGeral === 'INACTIVE' ? 'Reativar' : 'Desativar'}
                       </button>
@@ -174,8 +196,8 @@ export function ExpositoresClient({ eventId, suppliers, categories }: { eventId:
                 <input required name="razaoSocial" defaultValue={editing?.razaoSocial} /></div>
               <div className="field"><label>Nome fantasia <span className="req">*</span></label>
                 <input required name="nomeFantasia" defaultValue={editing?.nomeFantasia} /></div>
-              <div className="field"><label>CNPJ <span className="req">*</span></label>
-                <input required name="cnpj" placeholder="00.000.000/0000-00" defaultValue={editing?.cnpj} /></div>
+              <div className="field"><label>CNPJ</label>
+                <input name="cnpj" placeholder="00.000.000/0000-00 (opcional)" defaultValue={editing?.cnpj} /></div>
               <div className="field"><label>Inscrição estadual</label>
                 <input name="inscricaoEstadual" defaultValue={editing?.inscricaoEstadual} /></div>
               <div className="field"><label>Cidade</label><input name="cidade" defaultValue={editing?.endereco.cidade} /></div>
@@ -197,7 +219,8 @@ export function ExpositoresClient({ eventId, suppliers, categories }: { eventId:
               <div className="field"><label>Número do stand <span className="req">*</span></label><input required name="standNumero" defaultValue={editing?.standNumero} /></div>
               <div className="field"><label>Localização</label><input name="standLocalizacao" defaultValue={editing?.standLocalizacao} /></div>
               <div className="field"><label>Categoria</label>
-                <select name="categoria" defaultValue={editing?.categoria ?? categories[0]}>
+                <select name="categoria" defaultValue={editing?.categoria ?? ''}>
+                  <option value="">Sem categoria</option>
                   {categories.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
@@ -205,8 +228,38 @@ export function ExpositoresClient({ eventId, suppliers, categories }: { eventId:
                 <textarea name="observacoesInternas" defaultValue={editing?.observacoesInternas} /></div>
             </div>
           </fieldset>
+          {!editing && (
+            <fieldset>
+              <legend>Acesso ao portal (opcional)</legend>
+              <div className="field full">
+                <label>E-mail de login</label>
+                <input type="email" name="loginEmail" placeholder="Deixe em branco para não criar acesso agora" />
+                <p className="help">Se preenchido, uma senha temporária forte é gerada e mostrada uma única vez ao salvar — você a copia e repassa ao expositor por fora do sistema. Ele será obrigado a trocá-la no primeiro acesso.</p>
+              </div>
+            </fieldset>
+          )}
         </form>
       </Drawer>
+
+      {credentials && (
+        <div className="overlay open" onMouseDown={(e) => { if (e.target === e.currentTarget) setCredentials(null); }}>
+          <div className="modal">
+            <h3>Acesso criado</h3>
+            <p>Copie estas credenciais agora — a senha não será mostrada novamente. Repasse ao expositor por fora do sistema (WhatsApp, telefone, etc.).</p>
+            <div className="field mb-16">
+              <label>E-mail</label>
+              <input readOnly value={credentials.email} onFocus={(e) => e.target.select()} />
+            </div>
+            <div className="field mb-16">
+              <label>Senha temporária</label>
+              <input readOnly value={credentials.tempPassword} onFocus={(e) => e.target.select()} />
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-primary" onClick={() => setCredentials(null)}>Já copiei, fechar</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <ConfirmModal
         open={Boolean(confirmTarget)}

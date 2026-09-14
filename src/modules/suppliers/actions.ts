@@ -1,13 +1,15 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { adminDb } from '@/lib/firebase/admin';
+import { adminDb, adminAuth } from '@/lib/firebase/admin';
 import { COLLECTIONS } from '@/config/firestore-collections';
 import { requireRole, getCurrentUser } from '@/lib/auth/session';
 import { addAuditLog } from '@/modules/audit/log';
 import { supplierAdminSchema, supplierSelfEditSchema } from '@/modules/suppliers/schemas';
 import { findSupplierByCnpj, getSupplierById } from '@/modules/suppliers/queries';
-import type { Supplier } from '@/types/domain';
+import { generateTempPassword } from '@/lib/passwords';
+import type { Supplier, UserProfile } from '@/types/domain';
+import { z } from 'zod';
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -15,39 +17,127 @@ export type ActionResult = { ok: true } | { ok: false; error: string };
 /* ADMIN: criar / editar expositor                                     */
 /* ------------------------------------------------------------------ */
 
-export async function createSupplierAction(eventId: string, raw: unknown): Promise<ActionResult> {
+const loginEmailSchema = z.string().email('E-mail de login inválido.').optional().or(z.literal(''));
+
+export type CreateSupplierResult =
+  | { ok: true; credentials?: { email: string; tempPassword: string } }
+  | { ok: false; error: string };
+
+/**
+ * `loginEmail`, quando informado, provisiona também o acesso ao portal:
+ * cria o usuário no Firebase Authentication com uma senha temporária
+ * forte (nunca gerada no cliente, nunca enviada por e-mail/servidor —
+ * só é retornada uma vez, nesta resposta, para o admin copiar e passar
+ * ao expositor por fora do sistema) e cria o perfil com
+ * `mustChangePassword: true`.
+ */
+export async function createSupplierAction(eventId: string, raw: unknown, loginEmail?: string): Promise<CreateSupplierResult> {
   const user = await requireRole('SUPER_ADMIN');
   const parsed = supplierAdminSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Dados inválidos.' };
   const data = parsed.data;
 
-  const dup = await findSupplierByCnpj(eventId, data.cnpj);
-  if (dup) return { ok: false, error: `Já existe um expositor com este CNPJ neste evento: ${dup.nomeFantasia}.` };
+  const emailParsed = loginEmailSchema.safeParse(loginEmail ?? '');
+  if (!emailParsed.success) return { ok: false, error: emailParsed.error.issues[0]?.message ?? 'E-mail inválido.' };
+
+  if (data.cnpj) {
+    const dup = await findSupplierByCnpj(eventId, data.cnpj);
+    if (dup) return { ok: false, error: `Já existe um expositor com este CNPJ neste evento: ${dup.nomeFantasia}.` };
+  }
 
   const countSnap = await adminDb().collection(COLLECTIONS.suppliers).where('eventId', '==', eventId).count().get();
   const codigo = `EXP-${String(countSnap.data().count + 1).padStart(3, '0')}`;
 
   const ref = adminDb().collection(COLLECTIONS.suppliers).doc();
   const now = new Date().toISOString();
+
+  let authUid: string | null = null;
+  let tempPassword: string | undefined;
+  const email = emailParsed.data;
+
+  if (email) {
+    tempPassword = generateTempPassword();
+    try {
+      const created = await adminAuth().createUser({ email, password: tempPassword, displayName: data.responsavel.nome, emailVerified: true });
+      authUid = created.uid;
+    } catch (err) {
+      const code = (err as { code?: string })?.code;
+      if (code === 'auth/email-already-exists') return { ok: false, error: 'Já existe um usuário com este e-mail de login.' };
+      return { ok: false, error: 'Não foi possível criar o login do expositor.' };
+    }
+  }
+
   const supplier: Supplier = {
     id: ref.id, eventId, codigo,
     razaoSocial: data.razaoSocial, nomeFantasia: data.nomeFantasia, cnpj: data.cnpj,
     inscricaoEstadual: data.inscricaoEstadual ?? '', endereco: data.endereco, responsavel: data.responsavel,
     nomeExibido: data.nomeFantasia, standNumero: data.standNumero, standLocalizacao: data.standLocalizacao ?? '',
-    standMetragem: data.standMetragem ?? 0, categoria: data.categoria, observacoesInternas: data.observacoesInternas ?? '',
+    standMetragem: data.standMetragem ?? 0, categoria: data.categoria ?? '', observacoesInternas: data.observacoesInternas ?? '',
     statusGeral: 'PENDING', statusCadastral: 'NOT_STARTED', statusDash: 'PENDING_REVIEW', statusFinanceiro: 'NO_CHARGE',
-    verifiedAt: null, verifiedBy: null, validatedAt: null, validatedBy: null, authUid: null,
+    verifiedAt: null, verifiedBy: null, validatedAt: null, validatedBy: null, authUid,
     createdAt: now, updatedAt: now,
   };
   await ref.set(supplier);
+
+  if (authUid && email) {
+    const profile: UserProfile = {
+      uid: authUid, email, name: data.responsavel.nome, role: 'EXPOSITOR',
+      supplierId: ref.id, eventId, mustChangePassword: true, createdAt: now,
+    };
+    await adminDb().collection(COLLECTIONS.profiles).doc(authUid).set(profile);
+  }
+
   await addAuditLog({
     eventId, userName: user.name, entityType: 'EXPOSITOR', entityId: ref.id, entityLabel: supplier.nomeFantasia,
-    action: 'EXPOSITOR_CRIADO', details: 'Expositor cadastrado manualmente pelo administrador.',
+    action: 'EXPOSITOR_CRIADO', details: authUid ? 'Expositor cadastrado com acesso ao portal provisionado.' : 'Expositor cadastrado manualmente pelo administrador (sem login).',
   });
 
   revalidatePath('/admin/expositores');
   revalidatePath('/admin/dashboard');
-  return { ok: true };
+  return tempPassword && email ? { ok: true, credentials: { email, tempPassword } } : { ok: true };
+}
+
+/** Gera uma nova senha temporária para um expositor que já tem login, ou cria o login se ainda não existir. */
+export async function resetSupplierPasswordAction(supplierId: string, loginEmail?: string): Promise<CreateSupplierResult> {
+  const user = await requireRole('SUPER_ADMIN');
+  const supplier = await getSupplierById(supplierId);
+  if (!supplier) return { ok: false, error: 'Expositor não encontrado.' };
+
+  const tempPassword = generateTempPassword();
+  let authUid = supplier.authUid;
+  let email = loginEmail?.trim() || supplier.responsavel.email;
+
+  try {
+    if (authUid) {
+      const updated = await adminAuth().updateUser(authUid, { password: tempPassword });
+      email = updated.email ?? email;
+    } else {
+      const emailParsed = z.string().email('E-mail de login inválido.').safeParse(email);
+      if (!emailParsed.success) return { ok: false, error: emailParsed.error.issues[0]?.message ?? 'E-mail inválido.' };
+      const created = await adminAuth().createUser({ email, password: tempPassword, displayName: supplier.responsavel.nome, emailVerified: true });
+      authUid = created.uid;
+      await adminDb().collection(COLLECTIONS.suppliers).doc(supplierId).update({ authUid });
+    }
+  } catch (err) {
+    const code = (err as { code?: string })?.code;
+    if (code === 'auth/email-already-exists') return { ok: false, error: 'Já existe um usuário com este e-mail de login.' };
+    return { ok: false, error: 'Não foi possível gerar a nova senha.' };
+  }
+  if (!authUid) return { ok: false, error: 'Não foi possível gerar a nova senha.' };
+
+  const now = new Date().toISOString();
+  await adminDb().collection(COLLECTIONS.profiles).doc(authUid).set(
+    { uid: authUid, email, name: supplier.responsavel.nome, role: 'EXPOSITOR', supplierId, eventId: supplier.eventId, mustChangePassword: true, createdAt: now },
+    { merge: true },
+  );
+
+  await addAuditLog({
+    eventId: supplier.eventId, userName: user.name, entityType: 'EXPOSITOR', entityId: supplierId, entityLabel: supplier.nomeFantasia,
+    action: 'STATUS_ALTERADO', details: 'Nova senha temporária gerada pelo administrador.',
+  });
+
+  revalidatePath(`/admin/expositores/${supplierId}`);
+  return { ok: true, credentials: { email, tempPassword } };
 }
 
 export async function updateSupplierAdminAction(supplierId: string, raw: unknown): Promise<ActionResult> {
@@ -59,13 +149,15 @@ export async function updateSupplierAdminAction(supplierId: string, raw: unknown
   const existing = await getSupplierById(supplierId);
   if (!existing) return { ok: false, error: 'Expositor não encontrado.' };
 
-  const dup = await findSupplierByCnpj(existing.eventId, data.cnpj, supplierId);
-  if (dup) return { ok: false, error: `Já existe um expositor com este CNPJ neste evento: ${dup.nomeFantasia}.` };
+  if (data.cnpj) {
+    const dup = await findSupplierByCnpj(existing.eventId, data.cnpj, supplierId);
+    if (dup) return { ok: false, error: `Já existe um expositor com este CNPJ neste evento: ${dup.nomeFantasia}.` };
+  }
 
   await adminDb().collection(COLLECTIONS.suppliers).doc(supplierId).update({
     razaoSocial: data.razaoSocial, nomeFantasia: data.nomeFantasia, cnpj: data.cnpj,
     inscricaoEstadual: data.inscricaoEstadual ?? '', endereco: data.endereco, responsavel: data.responsavel,
-    standNumero: data.standNumero, standLocalizacao: data.standLocalizacao ?? '', categoria: data.categoria,
+    standNumero: data.standNumero, standLocalizacao: data.standLocalizacao ?? '', categoria: data.categoria ?? '',
     observacoesInternas: data.observacoesInternas ?? '', standMetragem: data.standMetragem ?? 0,
     updatedAt: new Date().toISOString(),
   });
@@ -170,8 +262,10 @@ export async function updateSupplierSelfAction(raw: unknown): Promise<ActionResu
   const existing = await getSupplierById(user.supplierId);
   if (!existing) return { ok: false, error: 'Expositor não encontrado.' };
 
-  const dup = await findSupplierByCnpj(existing.eventId, data.cnpj, user.supplierId);
-  if (dup) return { ok: false, error: 'Este CNPJ já está em uso por outro expositor neste evento.' };
+  if (data.cnpj) {
+    const dup = await findSupplierByCnpj(existing.eventId, data.cnpj, user.supplierId);
+    if (dup) return { ok: false, error: 'Este CNPJ já está em uso por outro expositor neste evento.' };
+  }
 
   // Preencher/editar avança automaticamente o status cadastral, mas nunca
   // pula direto para "verificado" ou "validado" — isso é sempre feito

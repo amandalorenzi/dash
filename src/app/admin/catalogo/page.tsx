@@ -13,10 +13,10 @@ export default async function CatalogoPage() {
   const eventId = await getCurrentEventId();
 
   if (!eventId) {
-    return <AppShell active="catalogo" user={user}><EmptyState icon="📅" title="Nenhum evento" text="Cadastre um evento primeiro." /></AppShell>;
+    return <AppShell active="catalogo" user={user}><EmptyState icon="📅" title="Nenhum evento" text="Crie um evento em Configurações → Eventos antes de usar esta tela." /></AppShell>;
   }
 
-  const [items, categories] = await Promise.all([listCatalogItemsByEvent(eventId), listCategories(eventId)]);
+  const [items, categories] = await Promise.all([listCatalogItemsByEvent(eventId), listCategories(eventId, 'ITEM')]);
 
   return (
     <AppShell active="catalogo" user={user}>
