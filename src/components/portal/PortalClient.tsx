@@ -7,9 +7,8 @@ import { getFirebaseAuthClient } from '@/lib/firebase/client';
 import { StatusBadge, Badge, EmptyState } from '@/components/ui/Badge';
 import { Drawer, ConfirmModal } from '@/components/ui/Drawer';
 import { useToast } from '@/components/ui/useToast';
-import { fmtMoney, fmtDate, fmtDateShort } from '@/utils/format';
+import { fmtMoney, fmtDateShort } from '@/utils/format';
 import {
-  STATUS_CADASTRAL_LABEL, STATUS_DASH_LABEL, STATUS_FINANCEIRO_LABEL, STATUS_GERAL_LABEL,
   APPROVAL_STATUS_LABEL, BILLING_UNIT_LABEL, DOCUMENT_STATUS_LABEL,
 } from '@/config/labels';
 import { calculateSupplierBalance, calculateOrderItemTotal } from '@/modules/orders/calculations';
@@ -18,7 +17,12 @@ import { requestOrderItemAction } from '@/modules/orders/actions';
 import { addTeamMemberAction, removeTeamMemberAction } from '@/modules/team/actions';
 import { addDocumentAction } from '@/modules/documents/actions';
 import { EventUpdatesFeed } from '@/components/shared/EventUpdatesFeed';
-import type { Supplier, SupplierOrder, Payment, CatalogItem, TeamMember, SupplierDocument, Deadline, AuditLog, FirestoreEvent, EventUpdate } from '@/types/domain';
+import { DiscussionPanel } from '@/components/shared/DiscussionPanel';
+import { EventHero } from '@/components/portal/EventHero';
+import { ExhibitorDashboard } from '@/components/portal/ExhibitorDashboard';
+import { Avatar } from '@/components/ui/Avatar';
+import { updateMyAvatarAction } from '@/modules/users/profile-actions';
+import type { Supplier, SupplierOrder, Payment, CatalogItem, TeamMember, SupplierDocument, Deadline, FirestoreEvent, EventUpdate, DiscussionMessage } from '@/types/domain';
 
 const TABS = [
   { key: 'geral', label: 'Visão geral' },
@@ -30,13 +34,14 @@ const TABS = [
   { key: 'financeiro', label: 'Financeiro' },
   { key: 'prazos', label: 'Prazos' },
   { key: 'manual', label: 'Manual do expositor' },
-  { key: 'historico', label: 'Histórico' },
+  { key: 'discussoes', label: 'Discussões' },
 ];
 
-export function PortalClient({ userName, eventName, event, updates, supplier, orders, payments, catalogItems, team, documents, deadlines, auditLogs }: {
-  userName: string; eventName: string; event: FirestoreEvent | null; updates: EventUpdate[];
+export function PortalClient({ userName, userAvatarUrl, eventName, event, updates, supplier, orders, payments, catalogItems, team, documents, deadlines, discussion }: {
+  userName: string; userAvatarUrl?: string | null; eventName: string; event: FirestoreEvent | null; updates: EventUpdate[];
   supplier: Supplier; orders: SupplierOrder[]; payments: Payment[];
-  catalogItems: CatalogItem[]; team: TeamMember[]; documents: SupplierDocument[]; deadlines: Deadline[]; auditLogs: AuditLog[];
+  catalogItems: CatalogItem[]; team: TeamMember[]; documents: SupplierDocument[]; deadlines: Deadline[];
+  discussion: DiscussionMessage[];
 }) {
   const router = useRouter();
   const { toast, ToastHost } = useToast();
@@ -58,36 +63,44 @@ export function PortalClient({ userName, eventName, event, updates, supplier, or
       <div className="portal-topbar">
         <div className="brand-mark">dash<span className="dot">.</span> <span style={{ fontSize: 12, fontWeight: 500, color: '#C7CAF0' }}>Portal do Expositor</span></div>
         <div className="user-chip" style={{ background: 'rgba(255,255,255,.08)', borderColor: 'transparent', color: '#fff' }} onClick={() => setLogoutConfirm(true)}>
-          <div className="avatar">{initials(userName)}</div>
+          <Avatar name={userName} url={userAvatarUrl} size={28} />
           <div><span className="name" style={{ color: '#fff' }}>{userName}</span><span className="role" style={{ color: '#C7CAF0' }}>Expositor</span></div>
         </div>
       </div>
 
       <ToastHost />
-      <div className="portal-shell">
-        <div className="supplier-header">
-          <div>
-            <h1>Olá, {supplier.nomeFantasia}</h1>
-            <div className="stand">Estande {supplier.standNumero} · {supplier.standLocalizacao || '—'} · {eventName}</div>
-          </div>
-          <StatusBadge value={supplier.statusGeral} labelMap={STATUS_GERAL_LABEL} />
-        </div>
 
+      <EventHero event={event} />
+
+      <div className="portal-tabs">
         <div className="tabs">
           {TABS.map((t) => <button key={t.key} className={`tab-btn ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>{t.label}</button>)}
         </div>
+      </div>
 
-        {tab === 'geral' && <PortalGeral supplier={supplier} balance={balance} orders={orders} />}
+      <div className="portal-content">
+        {tab === 'geral' && (
+          <ExhibitorDashboard
+            supplier={supplier} event={event} updates={updates} orders={orders}
+            team={team} deadlines={deadlines} balance={balance} onNavigate={setTab}
+          />
+        )}
         {tab === 'updates' && <EventUpdatesFeed eventId={supplier.eventId} updates={updates} canPublish={false} />}
-        {tab === 'cadastro' && <PortalCadastro supplier={supplier} toast={toast} refresh={refresh} />}
+        {tab === 'cadastro' && <PortalCadastro supplier={supplier} userAvatarUrl={userAvatarUrl} toast={toast} refresh={refresh} />}
         {tab === 'extras' && <PortalExtras orders={orders} catalogItems={catalogItems} orderDeadline={event?.orderDeadline ?? null} toast={toast} refresh={refresh} />}
         {tab === 'equipe' && <PortalEquipe supplier={supplier} team={team} toast={toast} refresh={refresh} />}
         {tab === 'documentos' && <PortalDocumentos supplier={supplier} documents={documents} toast={toast} refresh={refresh} />}
         {tab === 'financeiro' && <PortalFinanceiro balance={balance} payments={payments} />}
         {tab === 'prazos' && <PortalPrazos deadlines={deadlines} />}
         {tab === 'manual' && <PortalManual event={event} />}
-        {tab === 'historico' && <PortalHistorico auditLogs={auditLogs} />}
+        {tab === 'discussoes' && <DiscussionPanel supplierId={supplier.id} messages={discussion} viewerSide="EXPOSITOR" />}
       </div>
+
+      <footer className="portal-footer">
+        <div className="brand-mark">dash<span className="dot">.</span></div>
+        <span>{eventName} | Portal do Expositor</span>
+        {event?.tagline && <em>{event.tagline}</em>}
+      </footer>
 
       <ConfirmModal open={logoutConfirm} title="Sair da conta" message={`Deseja encerrar a sessão de ${userName}?`} confirmLabel="Sair"
         onCancel={() => setLogoutConfirm(false)} onConfirm={handleLogout} />
@@ -95,43 +108,11 @@ export function PortalClient({ userName, eventName, event, updates, supplier, or
   );
 }
 
-function initials(name: string) { return name.trim().split(/\s+/).slice(0, 2).map((p) => p[0]).join('').toUpperCase(); }
-
-/* --------------------------------- GERAL ---------------------------------- */
-function PortalGeral({ supplier, balance, orders }: { supplier: Supplier; balance: ReturnType<typeof calculateSupplierBalance>; orders: SupplierOrder[] }) {
-  const pendencias: string[] = [];
-  if (['NOT_STARTED', 'IN_PROGRESS'].includes(supplier.statusCadastral)) pendencias.push('Finalize o preenchimento do seu cadastro e envie para análise.');
-  if (supplier.statusCadastral === 'NEEDS_CORRECTION') pendencias.push('A produção solicitou uma correção no seu cadastro.');
-  if (['PENDING_REVIEW', 'UNDER_REVIEW'].includes(supplier.statusDash)) pendencias.push('Seu cadastro está em análise pela equipe DASH.');
-  const pendentesAprovacao = orders.flatMap((o) => o.items).filter((i) => i.approvalStatus === 'PENDING').length;
-  if (pendentesAprovacao > 0) pendencias.push(`${pendentesAprovacao} extra(s) aguardando aprovação da DASH.`);
-  if (balance.saldoPendente > 0) pendencias.push(`Você tem ${fmtMoney(balance.saldoPendente)} em aberto.`);
-
-  return (
-    <>
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(3,1fr)', marginBottom: 16 }}>
-        <div className="stat-card"><div className="label">Status do cadastro</div><div style={{ marginTop: 8 }}><StatusBadge value={supplier.statusCadastral} labelMap={STATUS_CADASTRAL_LABEL} /></div></div>
-        <div className="stat-card"><div className="label">Validação DASH</div><div style={{ marginTop: 8 }}><StatusBadge value={supplier.statusDash} labelMap={STATUS_DASH_LABEL} /></div></div>
-        <div className="stat-card"><div className="label">Status financeiro</div><div style={{ marginTop: 8 }}><StatusBadge value={supplier.statusFinanceiro} labelMap={STATUS_FINANCEIRO_LABEL} /></div></div>
-      </div>
-      {pendencias.length > 0 && (
-        <div className="card mb-16">
-          <div className="card-header"><h3>Pendências</h3></div>
-          <div className="card-body"><ul className="checklist">{pendencias.map((p, i) => <li key={i}>⏳ {p}</li>)}</ul></div>
-        </div>
-      )}
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(3,1fr)' }}>
-        <div className="stat-card"><div className="label">Total solicitado</div><div className="value">{fmtMoney(balance.solicitado)}</div></div>
-        <div className="stat-card accent-pink"><div className="label">Total aprovado</div><div className="value">{fmtMoney(balance.aprovado)}</div></div>
-        <div className="stat-card"><div className="label">Saldo pendente</div><div className="value">{fmtMoney(balance.saldoPendente)}</div></div>
-      </div>
-    </>
-  );
-}
-
 /* ------------------------------- CADASTRO ---------------------------------- */
-function PortalCadastro({ supplier, toast, refresh }: { supplier: Supplier; toast: (m: string, t?: 'success' | 'error') => void; refresh: () => void }) {
+function PortalCadastro({ supplier, userAvatarUrl, toast, refresh }: { supplier: Supplier; userAvatarUrl?: string | null; toast: (m: string, t?: 'success' | 'error') => void; refresh: () => void }) {
   const [saving, setSaving] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState(userAvatarUrl ?? '');
+  const [savingAvatar, setSavingAvatar] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const canSubmit = supplier.statusCadastral === 'IN_PROGRESS' || supplier.statusCadastral === 'NEEDS_CORRECTION';
@@ -163,7 +144,34 @@ function PortalCadastro({ supplier, toast, refresh }: { supplier: Supplier; toas
     refresh();
   }
 
+  async function handleAvatarSave() {
+    setSavingAvatar(true);
+    const result = await updateMyAvatarAction(avatarUrl);
+    setSavingAvatar(false);
+    if (!result.ok) { toast(result.error, 'error'); return; }
+    toast('Foto de perfil atualizada.', 'success');
+    refresh();
+  }
+
   return (
+    <div className="flex-col gap-16">
+    <div className="card">
+      <div className="card-header"><h3>Foto de perfil</h3></div>
+      <div className="card-body">
+        <div className="flex items-center gap-16" style={{ flexWrap: 'wrap' }}>
+          <Avatar name={supplier.responsavel.nome} url={avatarUrl} size={56} />
+          <div className="field" style={{ flex: 1, minWidth: 260 }}>
+            <label>Link da imagem</label>
+            <input value={avatarUrl} onChange={(e) => setAvatarUrl(e.target.value)} placeholder="https://..." />
+            <p className="help">Cole o link de uma imagem (https). Sua foto aparece nas discussões com a equipe DASH.</p>
+          </div>
+          <button className="btn btn-secondary" onClick={handleAvatarSave} disabled={savingAvatar}>
+            {savingAvatar ? 'Salvando...' : 'Salvar foto'}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div className="card">
       <div className="card-header">
         <h3>Meus dados cadastrais</h3>
@@ -210,6 +218,7 @@ function PortalCadastro({ supplier, toast, refresh }: { supplier: Supplier; toas
           <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start' }} disabled={saving}>{saving ? 'Salvando...' : 'Salvar alterações'}</button>
         </form>
       </div>
+    </div>
     </div>
   );
 }
@@ -466,19 +475,3 @@ function PortalManual({ event }: { event: FirestoreEvent | null }) {
   );
 }
 
-/* -------------------------------- HISTÓRICO -------------------------------------- */
-function PortalHistorico({ auditLogs }: { auditLogs: AuditLog[] }) {
-  return (
-    <div className="table-wrap">
-      <div className="table-scroll">
-        <table className="data-table">
-          <thead><tr><th>Data</th><th>Ação</th><th>Detalhes</th></tr></thead>
-          <tbody>
-            {auditLogs.length === 0 && <tr><td colSpan={3}><EmptyState icon="🕓" title="Sem histórico ainda" text="As alterações do seu cadastro aparecerão aqui." /></td></tr>}
-            {auditLogs.map((l) => <tr key={l.id}><td>{fmtDate(l.createdAt)}</td><td><Badge label={l.action.replaceAll('_', ' ')} tone="info" /></td><td>{l.details}</td></tr>)}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}

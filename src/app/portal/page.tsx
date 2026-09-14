@@ -8,7 +8,7 @@ import { listCatalogItemsByEvent } from '@/modules/catalog/queries';
 import { listTeamMembers } from '@/modules/team/actions';
 import { listDocuments } from '@/modules/documents/actions';
 import { listDeadlinesByEvent } from '@/modules/deadlines/queries';
-import { listAuditLogsForEntity } from '@/modules/audit/log';
+import { listDiscussion } from '@/modules/discussions/queries';
 import { PortalClient } from '@/components/portal/PortalClient';
 
 export const dynamic = 'force-dynamic';
@@ -20,7 +20,7 @@ export default async function PortalPage() {
   const supplier = await getSupplierById(user.supplierId);
   if (!supplier) redirect('/login');
 
-  const [event, updates, orders, payments, catalogItems, team, documents, deadlines, auditLogs] = await Promise.all([
+  const [event, updates, orders, payments, catalogItems, team, documents, deadlines, discussion] = await Promise.all([
     getEventById(supplier.eventId),
     listEventUpdates(supplier.eventId),
     listOrdersBySupplier(supplier.id),
@@ -29,12 +29,13 @@ export default async function PortalPage() {
     listTeamMembers(supplier.id),
     listDocuments(supplier.id),
     listDeadlinesByEvent(supplier.eventId),
-    listAuditLogsForEntity(supplier.eventId, supplier.id),
+    listDiscussion(supplier.id),
   ]);
 
   return (
     <PortalClient
       userName={user.name}
+      userAvatarUrl={user.avatarUrl}
       eventName={event?.name ?? ''}
       event={event}
       updates={updates}
@@ -45,7 +46,7 @@ export default async function PortalPage() {
       team={team}
       documents={documents}
       deadlines={deadlines}
-      auditLogs={auditLogs}
+      discussion={discussion}
     />
   );
 }

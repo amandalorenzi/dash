@@ -5,6 +5,7 @@
 export const COLLECTIONS = {
   events: 'events',
   eventUpdates: 'eventUpdates',
+  discussions: 'discussions',
   categories: 'categories',
   suppliers: 'suppliers',
   catalogItems: 'catalogItems',

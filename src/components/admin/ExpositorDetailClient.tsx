@@ -16,23 +16,27 @@ import { addManualOrderItemAction, approveOrderItemAction } from '@/modules/orde
 import { registerPaymentAction, updatePaymentStatusAction } from '@/modules/payments/actions';
 import { addTeamMemberAction, removeTeamMemberAction } from '@/modules/team/actions';
 import { reviewDocumentAction } from '@/modules/documents/actions';
-import type { Supplier, SupplierOrder, Payment, CatalogItem, TeamMember, SupplierDocument, AuditLog, PaymentStatus } from '@/types/domain';
+import { DiscussionPanel } from '@/components/shared/DiscussionPanel';
+import type { SupplierPendingCounts } from '@/modules/approvals/pending';
+import type { Supplier, SupplierOrder, Payment, CatalogItem, TeamMember, SupplierDocument, AuditLog, PaymentStatus, DiscussionMessage } from '@/types/domain';
 
-const TABS = [
+const TABS: { key: string; label: string; pendingKey?: keyof SupplierPendingCounts }[] = [
   { key: 'geral', label: 'Visão geral' },
-  { key: 'cadastro', label: 'Cadastro' },
-  { key: 'extras', label: 'Extras' },
-  { key: 'equipe', label: 'Equipe' },
-  { key: 'documentos', label: 'Documentos' },
-  { key: 'pagamentos', label: 'Pagamentos' },
+  { key: 'cadastro', label: 'Cadastro', pendingKey: 'cadastro' },
+  { key: 'extras', label: 'Extras', pendingKey: 'extras' },
+  { key: 'equipe', label: 'Equipe', pendingKey: 'equipe' },
+  { key: 'documentos', label: 'Documentos', pendingKey: 'documentos' },
+  { key: 'pagamentos', label: 'Pagamentos', pendingKey: 'pagamentos' },
+  { key: 'discussao', label: 'Discussão' },
   { key: 'historico', label: 'Histórico' },
 ];
 
 export function ExpositorDetailClient({
-  supplier, orders, payments, catalogItems, team, documents, auditLogs,
+  supplier, orders, payments, catalogItems, team, documents, auditLogs, discussion, pendings,
 }: {
   supplier: Supplier; orders: SupplierOrder[]; payments: Payment[]; catalogItems: CatalogItem[];
   team: TeamMember[]; documents: SupplierDocument[]; auditLogs: AuditLog[];
+  discussion: DiscussionMessage[]; pendings: SupplierPendingCounts;
 }) {
   const router = useRouter();
   const { toast, ToastHost } = useToast();
@@ -54,9 +58,15 @@ export function ExpositorDetailClient({
       </div>
 
       <div className="tabs">
-        {TABS.map((t) => (
-          <button key={t.key} className={`tab-btn ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>{t.label}</button>
-        ))}
+        {TABS.map((t) => {
+          const count = t.pendingKey ? pendings[t.pendingKey] : 0;
+          return (
+            <button key={t.key} className={`tab-btn ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>
+              {t.label}
+              {count > 0 && <span className="pill-count" title={`${count} pendência(s)`}>{count}</span>}
+            </button>
+          );
+        })}
       </div>
 
       {tab === 'geral' && <TabGeral supplier={supplier} orders={orders} balance={balance} />}
@@ -65,6 +75,7 @@ export function ExpositorDetailClient({
       {tab === 'equipe' && <TabEquipe supplier={supplier} team={team} toast={toast} refresh={refresh} />}
       {tab === 'documentos' && <TabDocumentos documents={documents} toast={toast} refresh={refresh} />}
       {tab === 'pagamentos' && <TabPagamentos supplier={supplier} payments={payments} balance={balance} toast={toast} refresh={refresh} />}
+      {tab === 'discussao' && <DiscussionPanel supplierId={supplier.id} messages={discussion} viewerSide="DASH" canDelete />}
       {tab === 'historico' && <TabHistorico auditLogs={auditLogs} />}
     </>
   );

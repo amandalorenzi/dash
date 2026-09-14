@@ -1,7 +1,6 @@
 'use client';
 
 import { useMemo, useState, type FormEvent } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { StatusBadge, EmptyState } from '@/components/ui/Badge';
 import { Drawer, ConfirmModal } from '@/components/ui/Drawer';
@@ -166,9 +165,15 @@ export function ExpositoresClient({ eventId, suppliers, categories }: { eventId:
                 <tr><td colSpan={10}><EmptyState icon="🔍" title="Nenhum expositor encontrado" text="Ajuste os filtros ou cadastre um novo expositor." /></td></tr>
               )}
               {filtered.map((s) => (
-                <tr key={s.id} className="clickable">
+                // A linha inteira abre o expositor; os botões de ação param a
+                // propagação para não disparar a navegação junto.
+                <tr
+                  key={s.id} className="clickable" tabIndex={0} role="link"
+                  onClick={() => router.push(`/admin/expositores/${s.id}`)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') router.push(`/admin/expositores/${s.id}`); }}
+                >
                   <td>
-                    <Link href={`/admin/expositores/${s.id}`} className="table-name" style={{ textDecoration: 'none' }}>{s.nomeFantasia}</Link>
+                    <div className="table-name">{s.nomeFantasia}</div>
                     <div className="table-sub">{s.razaoSocial}</div>
                   </td>
                   <td>{s.codigo}</td>
@@ -179,7 +184,7 @@ export function ExpositoresClient({ eventId, suppliers, categories }: { eventId:
                   <td><StatusBadge value={s.statusCadastral} labelMap={STATUS_CADASTRAL_LABEL} /></td>
                   <td><StatusBadge value={s.statusDash} labelMap={STATUS_DASH_LABEL} /></td>
                   <td><StatusBadge value={s.statusFinanceiro} labelMap={STATUS_FINANCEIRO_LABEL} /></td>
-                  <td>
+                  <td onClick={(e) => e.stopPropagation()}>
                     <div className="row-actions">
                       <button className="btn btn-ghost btn-sm" onClick={() => openEdit(s)}>Editar</button>
                       {s.responsavel.email && (

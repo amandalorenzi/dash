@@ -7,6 +7,8 @@ import { listCatalogItemsByEvent } from '@/modules/catalog/queries';
 import { listTeamMembers } from '@/modules/team/actions';
 import { listDocuments } from '@/modules/documents/actions';
 import { listAuditLogsForEntity } from '@/modules/audit/log';
+import { listDiscussion } from '@/modules/discussions/queries';
+import { countSupplierPendings } from '@/modules/approvals/pending';
 import { AppShell } from '@/components/layout/AppShell';
 import { ExpositorDetailClient } from '@/components/admin/ExpositorDetailClient';
 
@@ -18,14 +20,17 @@ export default async function ExpositorDetailPage({ params }: { params: Promise<
   const supplier = await getSupplierById(id);
   if (!supplier) notFound();
 
-  const [orders, payments, catalogItems, team, documents, auditLogs] = await Promise.all([
+  const [orders, payments, catalogItems, team, documents, auditLogs, discussion] = await Promise.all([
     listOrdersBySupplier(id),
     listPaymentsBySupplier(id),
     listCatalogItemsByEvent(supplier.eventId),
     listTeamMembers(id),
     listDocuments(id),
     listAuditLogsForEntity(supplier.eventId, id),
+    listDiscussion(id),
   ]);
+
+  const pendings = countSupplierPendings(supplier, orders, payments, team, documents);
 
   return (
     <AppShell active="expositores" user={user}>
@@ -37,6 +42,8 @@ export default async function ExpositorDetailPage({ params }: { params: Promise<
         team={team}
         documents={documents}
         auditLogs={auditLogs}
+        discussion={discussion}
+        pendings={pendings}
       />
     </AppShell>
   );

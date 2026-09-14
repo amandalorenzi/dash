@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { listEvents } from '@/modules/events/queries';
 import { getCurrentEventId } from '@/lib/event-context';
+import { getEventPendingCount } from '@/modules/approvals/queries';
 import { EventSwitcher, LogoutTrigger, MobileMenuToggle } from '@/components/layout/TopbarClient';
 import { ROLE_LABEL } from '@/config/labels';
 import type { UserProfile } from '@/types/domain';
@@ -20,6 +21,8 @@ const CONFIG_ITEMS = [
 export async function AppShell({ active, user, children }: { active: string; user: UserProfile; children: React.ReactNode }) {
   const events = await listEvents();
   const currentEventId = await getCurrentEventId();
+  // Contador de pendências exibido ao lado de "Expositores" na barra lateral.
+  const pendingCount = currentEventId ? await getEventPendingCount(currentEventId) : 0;
 
   return (
     <div className="app-shell">
@@ -35,6 +38,9 @@ export async function AppShell({ active, user, children }: { active: string; use
           {NAV_ITEMS.map((item) => (
             <Link key={item.key} href={item.href} className={`nav-item ${active === item.key ? 'active' : ''}`}>
               <span className="ic">{item.icon}</span> {item.label}
+              {item.key === 'expositores' && pendingCount > 0 && (
+                <span className="pill-count" title={`${pendingCount} item(ns) aguardando validação`}>{pendingCount}</span>
+              )}
             </Link>
           ))}
           <div className="sidebar-section-label">Configurações</div>

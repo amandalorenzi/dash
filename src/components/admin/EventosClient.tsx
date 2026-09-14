@@ -38,6 +38,11 @@ export function EventosClient({ events, currentEventId }: { events: FirestoreEve
         bairro: String(fd.get('bairro') || ''), cidade: String(fd.get('cidade') || ''),
         estado: String(fd.get('estado') || ''), cep: String(fd.get('cep') || ''),
       },
+      horario: String(fd.get('horario') || ''),
+      tagline: String(fd.get('tagline') || ''),
+      bannerUrl: String(fd.get('bannerUrl') || ''),
+      logoUrl: String(fd.get('logoUrl') || ''),
+      floorPlanUrl: String(fd.get('floorPlanUrl') || ''),
       orderDeadline: String(fd.get('orderDeadline') || ''),
       guideContent: String(fd.get('guideContent') || ''),
     };
@@ -129,6 +134,27 @@ export function EventosClient({ events, currentEventId }: { events: FirestoreEve
               <div className="field full"><label>Local / pavilhão</label><input name="local" defaultValue={editing?.local} /></div>
               <div className="field"><label>Data de início <span className="req">*</span></label><input required type="date" name="dataInicio" defaultValue={editing?.dataInicio} /></div>
               <div className="field"><label>Data de término <span className="req">*</span></label><input required type="date" name="dataFim" defaultValue={editing?.dataFim} /></div>
+              <div className="field"><label>Horário</label><input name="horario" placeholder="Ex: 9h às 19h" defaultValue={editing?.horario} /></div>
+              <div className="field"><label>Tagline</label><input name="tagline" placeholder="Ex: Pessoas. Propósito. Possibilidades." defaultValue={editing?.tagline} /></div>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>Identidade visual do evento</legend>
+            <div className="form-grid">
+              <div className="field full">
+                <label>Logo do evento (link)</label>
+                <input type="url" name="logoUrl" placeholder="https://..." defaultValue={editing?.logoUrl} />
+                <p className="help">Aparece no topo do portal do expositor. Sem logo, o nome do evento é usado.</p>
+              </div>
+              <div className="field full">
+                <label>Banner de fundo (link)</label>
+                <input type="url" name="bannerUrl" placeholder="https://..." defaultValue={editing?.bannerUrl} />
+              </div>
+              <div className="field full">
+                <label>Planta do evento (link)</label>
+                <input type="url" name="floorPlanUrl" placeholder="https://..." defaultValue={editing?.floorPlanUrl} />
+                <p className="help">Link para o mapa/planta. O expositor acessa pelo card &quot;Seu stand&quot;.</p>
+              </div>
             </div>
           </fieldset>
           <fieldset>

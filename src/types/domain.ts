@@ -33,6 +33,15 @@ export interface FirestoreEvent {
   dataInicio: string;
   dataFim: string;
   endereco?: Address;
+  /** Horário de funcionamento exibido no hero (ex.: "9h às 19h"). */
+  horario?: string;
+  /** Imagens do evento (URLs externas — não usa Firebase Storage nesta versão). */
+  bannerUrl?: string;
+  logoUrl?: string;
+  /** Link para a planta do evento (PDF/imagem hospedada externamente). */
+  floorPlanUrl?: string;
+  /** Frase/tagline do evento exibida no hero e no rodapé do portal. */
+  tagline?: string;
   /** Prazo final para envio de solicitações de extras. */
   orderDeadline?: string | null;
   /** Conteúdo do "Manual do expositor" deste evento, editável pelo admin. */
@@ -46,6 +55,25 @@ export interface EventUpdate {
   id: string;
   eventId: string;
   authorName: string;
+  authorAvatarUrl?: string | null;
+  /** Título curto opcional, exibido em destaque no resumo do portal. */
+  title?: string;
+  message: string;
+  createdAt: string;
+}
+
+/**
+ * Mensagem trocada entre a equipe DASH e um expositor específico
+ * (aba "Discussão" no admin e no portal).
+ */
+export interface DiscussionMessage {
+  id: string;
+  eventId: string;
+  supplierId: string;
+  authorName: string;
+  authorAvatarUrl?: string | null;
+  /** DASH = equipe interna; EXPOSITOR = o próprio expositor. */
+  authorSide: 'DASH' | 'EXPOSITOR';
   message: string;
   createdAt: string;
 }
@@ -159,10 +187,14 @@ export interface Payment {
   createdAt: string;
 }
 
+export type TeamMemberStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
 export interface TeamMember {
   id: string;
   eventId: string;
   supplierId: string;
+  /** Situação da credencial perante a DASH. Ausente = tratado como PENDING. */
+  status?: TeamMemberStatus;
   nome: string;
   cargo: string;
   email?: string;
@@ -212,6 +244,8 @@ export interface UserProfile {
   /** Preenchido apenas para role EXPOSITOR: vincula ao registro do expositor. */
   supplierId?: string | null;
   eventId?: string | null;
+  /** URL de avatar (link externo). Usado nos comunicados e nas discussões. */
+  avatarUrl?: string | null;
   /** true logo após criação/reset de senha pelo admin — força troca no próximo login. */
   mustChangePassword?: boolean;
   createdAt: string;

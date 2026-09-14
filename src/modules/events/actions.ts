@@ -22,6 +22,11 @@ const eventSchema = z.object({
     estado: z.string().optional().transform((v) => (v ?? '').toUpperCase()),
     cep: z.string().optional().transform((v) => v ?? ''),
   }),
+  horario: z.string().optional().transform((v) => v ?? ''),
+  tagline: z.string().optional().transform((v) => v ?? ''),
+  bannerUrl: z.string().optional().transform((v) => v ?? ''),
+  logoUrl: z.string().optional().transform((v) => v ?? ''),
+  floorPlanUrl: z.string().optional().transform((v) => v ?? ''),
   orderDeadline: z.string().optional().transform((v) => v || null),
   guideContent: z.string().optional().transform((v) => v ?? ''),
 }).refine((d) => d.dataFim >= d.dataInicio, {
@@ -123,7 +128,7 @@ export async function removeSharedDocumentAction(eventId: string, docId: string)
 
 /* ------------------------- Updates do evento (mural) ------------------------- */
 
-export async function publishEventUpdateAction(eventId: string, message: string): Promise<ActionResult> {
+export async function publishEventUpdateAction(eventId: string, message: string, title?: string): Promise<ActionResult> {
   const user = await getCurrentUser();
   if (!user || !['SUPER_ADMIN', 'PRODUCAO', 'FINANCEIRO', 'OPERACIONAL'].includes(user.role)) {
     return { ok: false, error: 'Não autorizado.' };
@@ -134,7 +139,10 @@ export async function publishEventUpdateAction(eventId: string, message: string)
 
   const ref = adminDb().collection(COLLECTIONS.eventUpdates).doc();
   const update: EventUpdate = {
-    id: ref.id, eventId, authorName: user.name, message: trimmed, createdAt: new Date().toISOString(),
+    id: ref.id, eventId,
+    authorName: user.name, authorAvatarUrl: user.avatarUrl ?? null,
+    title: title?.trim() || '',
+    message: trimmed, createdAt: new Date().toISOString(),
   };
   await ref.set(update);
   await addAuditLog({
