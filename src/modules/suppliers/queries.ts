@@ -39,3 +39,10 @@ export function suppliersNeedingAttention(suppliers: Supplier[]): Supplier[] {
     ['PAYMENT_PENDING', 'PAYMENT_REPORTED', 'OVERDUE'].includes(s.statusFinanceiro),
   );
 }
+
+export async function listSupplierUsers(supplierId: string): Promise<import('@/types/domain').UserProfile[]> {
+  const snap = await adminDb().collection(COLLECTIONS.profiles).where('supplierId', '==', supplierId).get();
+  return snap.docs
+    .map((d) => d.data() as import('@/types/domain').UserProfile)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}

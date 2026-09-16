@@ -62,14 +62,18 @@ export function EventSwitcher({ events, currentEventId }: { events: { id: string
   }
 
   return (
-    <select
-      className="event-switcher"
-      style={{ appearance: 'none', fontFamily: 'inherit' }}
-      value={current?.id}
-      onChange={(e) => handleChange(e.target.value)}
-    >
-      {events.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-    </select>
+    <div className="event-switcher-group">
+      <label htmlFor="event-switcher-select" className="event-switcher-label">Evento atual</label>
+      <select
+        id="event-switcher-select"
+        className="event-switcher"
+        style={{ appearance: 'none', fontFamily: 'inherit' }}
+        value={current?.id}
+        onChange={(e) => handleChange(e.target.value)}
+      >
+        {events.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+      </select>
+    </div>
   );
 }
 

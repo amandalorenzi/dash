@@ -1,0 +1,36 @@
+rules_version = '2';
+
+/**
+ * Regras do Firebase Storage.
+ *
+ * Limite de tamanho configurável por evento (event.maxUploadSizeMb) é
+ * aplicado no CLIENTE antes do upload (ver src/lib/firebase/storage.ts e os
+ * formulários de documento). Aqui, nas regras, aplicamos um teto FIXO de
+ * 10MB como rede de segurança — a configuração por evento não é lida aqui
+ * porque o Storage Rules não tem acesso direto e barato ao documento do
+ * Firestore em todo upload. Isto é uma limitação conhecida desta versão
+ * (documentada em docs/BATCH-01-DELIVERY.md): o limite por evento é um
+ * limite de UX, não uma garantia de segurança "dura".
+ */
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    match /documents/{eventId}/{supplierId}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('(image/.*|application/pdf|application/vnd\\.openxmlformats.*|application/msword|application/vnd\\.ms-excel)');
+    }
+
+    match /event-documents/{eventId}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && request.resource.size < 10 * 1024 * 1024;
+    }
+
+    match /avatars/{uid}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.resource.size < 5 * 1024 * 1024;
+    }
+  }
+}

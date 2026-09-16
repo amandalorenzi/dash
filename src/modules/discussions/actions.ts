@@ -58,3 +58,12 @@ export async function deleteDiscussionMessageAction(messageId: string, supplierI
   revalidatePath('/portal');
   return { ok: true };
 }
+
+/** Marca a discussão da própria empresa como lida até agora (usuário atual). */
+export async function markDiscussionReadAction(): Promise<ActionResult> {
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: 'Sessão inválida.' };
+  await adminDb().collection(COLLECTIONS.profiles).doc(user.uid).update({ lastDiscussionReadAt: new Date().toISOString() });
+  revalidatePath('/portal');
+  return { ok: true };
+}

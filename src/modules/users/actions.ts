@@ -16,10 +16,16 @@ export type UserActionResult =
 /** Papéis que podem ser atribuídos por esta tela (EXPOSITOR é criado pela tela de expositores). */
 const ASSIGNABLE_ROLES = ['SUPER_ADMIN', 'PRODUCAO', 'FINANCEIRO', 'OPERACIONAL'] as const;
 
+const avatarUrlSchema = z.string().trim().optional().transform((v) => v || null).refine(
+  (v) => !v || /^https:\/\/.+/i.test(v),
+  { message: 'A foto precisa ser um link começando com https://.' },
+);
+
 const userSchema = z.object({
   name: z.string().min(2, 'Informe o nome.'),
   email: z.string().email('E-mail inválido.'),
   role: z.enum(ASSIGNABLE_ROLES),
+  avatarUrl: avatarUrlSchema,
 });
 
 export async function listUsersAction(): Promise<UserProfile[]> {
@@ -34,7 +40,7 @@ export async function createUserAction(raw: unknown): Promise<UserActionResult> 
   const admin = await requireRole('SUPER_ADMIN');
   const parsed = userSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Dados inválidos.' };
-  const { name, email, role } = parsed.data;
+  const { name, email, role, avatarUrl } = parsed.data;
 
   const tempPassword = generateTempPassword();
   let uid: string;
@@ -48,7 +54,7 @@ export async function createUserAction(raw: unknown): Promise<UserActionResult> 
   }
 
   const profile: UserProfile = {
-    uid, email, name, role, supplierId: null, eventId: null, mustChangePassword: true, createdAt: new Date().toISOString(),
+    uid, email, name, role, avatarUrl, supplierId: null, eventId: null, mustChangePassword: true, createdAt: new Date().toISOString(),
   };
   await adminDb().collection(COLLECTIONS.profiles).doc(uid).set(profile);
   await addAuditLog({
@@ -58,6 +64,20 @@ export async function createUserAction(raw: unknown): Promise<UserActionResult> 
 
   revalidatePath('/admin/usuarios');
   return { ok: true, credentials: { email, tempPassword } };
+}
+
+export async function updateUserAvatarAction(uid: string, avatarUrl: string): Promise<UserActionResult> {
+  await requireRole('SUPER_ADMIN');
+  const parsed = avatarUrlSchema.safeParse(avatarUrl);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Link inválido.' };
+
+  const ref = adminDb().collection(COLLECTIONS.profiles).doc(uid);
+  const snap = await ref.get();
+  if (!snap.exists) return { ok: false, error: 'Usuário não encontrado.' };
+
+  await ref.update({ avatarUrl: parsed.data });
+  revalidatePath('/admin/usuarios');
+  return { ok: true };
 }
 
 export async function updateUserRoleAction(uid: string, role: Role): Promise<UserActionResult> {

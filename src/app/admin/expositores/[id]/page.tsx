@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth/session';
-import { getSupplierById } from '@/modules/suppliers/queries';
+import { getSupplierById, listSupplierUsers } from '@/modules/suppliers/queries';
+import { getEventById } from '@/modules/events/queries';
 import { listOrdersBySupplier } from '@/modules/orders/queries';
 import { listPaymentsBySupplier } from '@/modules/payments/queries';
 import { listCatalogItemsByEvent } from '@/modules/catalog/queries';
@@ -20,7 +21,8 @@ export default async function ExpositorDetailPage({ params }: { params: Promise<
   const supplier = await getSupplierById(id);
   if (!supplier) notFound();
 
-  const [orders, payments, catalogItems, team, documents, auditLogs, discussion] = await Promise.all([
+  const [event, orders, payments, catalogItems, team, documents, auditLogs, discussion] = await Promise.all([
+    getEventById(supplier.eventId),
     listOrdersBySupplier(id),
     listPaymentsBySupplier(id),
     listCatalogItemsByEvent(supplier.eventId),
@@ -29,6 +31,7 @@ export default async function ExpositorDetailPage({ params }: { params: Promise<
     listAuditLogsForEntity(supplier.eventId, id),
     listDiscussion(id),
   ]);
+  const supplierUsers = await listSupplierUsers(id);
 
   const pendings = countSupplierPendings(supplier, orders, payments, team, documents);
 
@@ -44,6 +47,8 @@ export default async function ExpositorDetailPage({ params }: { params: Promise<
         auditLogs={auditLogs}
         discussion={discussion}
         pendings={pendings}
+        supplierUsers={supplierUsers}
+        maxUploadSizeMb={event?.maxUploadSizeMb ?? 2}
       />
     </AppShell>
   );

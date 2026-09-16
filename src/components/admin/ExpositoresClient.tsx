@@ -13,7 +13,10 @@ import {
 import { fmtMoney } from '@/utils/format';
 import type { Supplier } from '@/types/domain';
 
-export function ExpositoresClient({ eventId, suppliers, categories }: { eventId: string; suppliers: Supplier[]; categories: string[] }) {
+export function ExpositoresClient({ eventId, suppliers, categories, alerts }: {
+  eventId: string; suppliers: Supplier[]; categories: string[];
+  alerts: Record<string, { pending: number; awaitingReply: boolean }>;
+}) {
   const router = useRouter();
   const { toast, ToastHost } = useToast();
 
@@ -173,7 +176,15 @@ export function ExpositoresClient({ eventId, suppliers, categories }: { eventId:
                   onKeyDown={(e) => { if (e.key === 'Enter') router.push(`/admin/expositores/${s.id}`); }}
                 >
                   <td>
-                    <div className="table-name">{s.nomeFantasia}</div>
+                    <div className="flex items-center gap-8">
+                      <div className="table-name">{s.nomeFantasia}</div>
+                      {alerts[s.id]?.pending > 0 && (
+                        <span className="pill-count" title={`${alerts[s.id].pending} pendência(s)`}>{alerts[s.id].pending}</span>
+                      )}
+                      {alerts[s.id]?.awaitingReply && (
+                        <span title="Aguardando resposta da DASH na Discussão" style={{ fontSize: 13 }}>💬</span>
+                      )}
+                    </div>
                     <div className="table-sub">{s.razaoSocial}</div>
                   </td>
                   <td>{s.codigo}</td>

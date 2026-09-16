@@ -48,6 +48,8 @@ export interface FirestoreEvent {
   guideContent?: string;
   /** Documentos/links compartilhados pela DASH, visíveis ao expositor. */
   sharedDocuments?: { id: string; name: string; url: string }[];
+  /** Tamanho máximo (MB) para upload de documentos neste evento. Padrão: 2. */
+  maxUploadSizeMb?: number;
   createdAt: string;
 }
 
@@ -211,6 +213,11 @@ export interface SupplierDocument {
   tipo: string;
   status: DocumentStatus;
   observacoes?: string;
+  /** URL de download do arquivo (Firebase Storage), quando houve upload real. */
+  url?: string | null;
+  storagePath?: string | null;
+  sizeBytes?: number | null;
+  uploadedBy?: string;
   uploadedAt: string;
   reviewedAt?: string | null;
   reviewedBy?: string | null;
@@ -244,8 +251,10 @@ export interface UserProfile {
   /** Preenchido apenas para role EXPOSITOR: vincula ao registro do expositor. */
   supplierId?: string | null;
   eventId?: string | null;
-  /** URL de avatar (link externo). Usado nos comunicados e nas discussões. */
+  /** URL de avatar (link externo ou Firebase Storage). Usado nos comunicados e nas discussões. */
   avatarUrl?: string | null;
+  /** Marca até quando este usuário já leu a discussão da própria empresa. */
+  lastDiscussionReadAt?: string | null;
   /** true logo após criação/reset de senha pelo admin — força troca no próximo login. */
   mustChangePassword?: boolean;
   createdAt: string;

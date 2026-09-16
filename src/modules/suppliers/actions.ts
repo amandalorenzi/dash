@@ -6,7 +6,7 @@ import { COLLECTIONS } from '@/config/firestore-collections';
 import { requireRole, getCurrentUser } from '@/lib/auth/session';
 import { addAuditLog } from '@/modules/audit/log';
 import { supplierAdminSchema, supplierSelfEditSchema } from '@/modules/suppliers/schemas';
-import { findSupplierByCnpj, getSupplierById } from '@/modules/suppliers/queries';
+import { findSupplierByCnpj, getSupplierById, listSupplierUsers } from '@/modules/suppliers/queries';
 import { generateTempPassword } from '@/lib/passwords';
 import type { Supplier, UserProfile } from '@/types/domain';
 import { z } from 'zod';
@@ -405,5 +405,85 @@ export async function deleteSupplierAction(supplierId: string, confirmationName:
 
   revalidatePath('/admin/expositores');
   revalidatePath('/admin/dashboard');
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------ */
+/* ADMIN: múltiplos acessos por expositor (mesma empresa)               */
+/* ------------------------------------------------------------------ */
+
+const addUserSchema = z.object({
+  name: z.string().min(2, 'Informe o nome.'),
+  email: z.string().email('E-mail inválido.'),
+});
+
+/**
+ * Adiciona mais um usuário com acesso ao portal do MESMO expositor —
+ * várias pessoas da mesma empresa podem ter login próprio, todas vendo os
+ * mesmos dados (cadastro, extras, discussão) porque tudo é ligado pelo
+ * supplierId, não pelo uid individual.
+ */
+export async function addSupplierUserAction(supplierId: string, raw: unknown): Promise<CreateSupplierResult> {
+  const admin = await requireRole('SUPER_ADMIN');
+  const parsed = addUserSchema.safeParse(raw);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Dados inválidos.' };
+  const { name, email } = parsed.data;
+
+  const supplier = await getSupplierById(supplierId);
+  if (!supplier) return { ok: false, error: 'Expositor não encontrado.' };
+
+  const tempPassword = generateTempPassword();
+  let uid: string;
+  try {
+    const created = await adminAuth().createUser({ email, password: tempPassword, displayName: name, emailVerified: true });
+    uid = created.uid;
+  } catch (err) {
+    const code = (err as { code?: string })?.code;
+    if (code === 'auth/email-already-exists') return { ok: false, error: 'Já existe um usuário com este e-mail.' };
+    return { ok: false, error: 'Não foi possível criar o usuário.' };
+  }
+
+  const now = new Date().toISOString();
+  await adminDb().collection(COLLECTIONS.profiles).doc(uid).set({
+    uid, email, name, role: 'EXPOSITOR', supplierId, eventId: supplier.eventId,
+    mustChangePassword: true, createdAt: now,
+  });
+  if (!supplier.authUid) await adminDb().collection(COLLECTIONS.suppliers).doc(supplierId).update({ authUid: uid });
+
+  await addAuditLog({
+    eventId: supplier.eventId, userName: admin.name, entityType: 'EXPOSITOR', entityId: supplierId,
+    entityLabel: supplier.nomeFantasia, action: 'EXPOSITOR_EDITADO', details: `Novo usuário de acesso adicionado: ${name} (${email}).`,
+  });
+
+  revalidatePath(`/admin/expositores/${supplierId}`);
+  return { ok: true, credentials: { email, tempPassword } };
+}
+
+export async function removeSupplierUserAction(uid: string, supplierId: string): Promise<ActionResult> {
+  const admin = await requireRole('SUPER_ADMIN');
+  const supplier = await getSupplierById(supplierId);
+  if (!supplier) return { ok: false, error: 'Expositor não encontrado.' };
+
+  const profileRef = adminDb().collection(COLLECTIONS.profiles).doc(uid);
+  const profileSnap = await profileRef.get();
+  if (!profileSnap.exists) return { ok: false, error: 'Usuário não encontrado.' };
+  const profile = profileSnap.data() as { supplierId?: string };
+  if (profile.supplierId !== supplierId) return { ok: false, error: 'Este usuário não pertence a este expositor.' };
+
+  try { await adminAuth().deleteUser(uid); } catch { /* já pode ter sido removido no console */ }
+  await profileRef.delete();
+
+  if (supplier.authUid === uid) {
+    const remaining = await listSupplierUsers(supplierId);
+    const next = remaining.find((u) => u.uid !== uid);
+    await adminDb().collection(COLLECTIONS.suppliers).doc(supplierId).update({ authUid: next?.uid ?? null });
+  }
+
+  await addAuditLog({
+    eventId: supplier.eventId, userName: admin.name, entityType: 'EXPOSITOR', entityId: supplierId,
+    entityLabel: supplier.nomeFantasia, action: 'EXPOSITOR_EDITADO', details: 'Um acesso de usuário foi removido.',
+  });
+
+  revalidatePath(`/admin/expositores/${supplierId}`);
   return { ok: true };
 }

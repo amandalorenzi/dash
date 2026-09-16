@@ -20,6 +20,9 @@ import { z } from 'zod';
 const documentSchema = z.object({
   nome: z.string().min(1, 'Informe o nome do arquivo.'),
   tipo: z.string().min(1, 'Selecione o tipo de documento.'),
+  url: z.string().url().optional(),
+  storagePath: z.string().optional(),
+  sizeBytes: z.coerce.number().optional(),
 });
 
 export async function listDocuments(supplierId: string): Promise<SupplierDocument[]> {
@@ -41,6 +44,8 @@ export async function addDocumentAction(supplierId: string, raw: unknown): Promi
   const ref = adminDb().collection(COLLECTIONS.documents).doc();
   const doc: SupplierDocument = {
     id: ref.id, eventId: supplier.eventId, supplierId, nome: parsed.data.nome, tipo: parsed.data.tipo,
+    url: parsed.data.url ?? null, storagePath: parsed.data.storagePath ?? null, sizeBytes: parsed.data.sizeBytes ?? null,
+    uploadedBy: user.name,
     status: 'PENDING_REVIEW', uploadedAt: new Date().toISOString(), reviewedAt: null, reviewedBy: null,
   };
   await ref.set(doc);

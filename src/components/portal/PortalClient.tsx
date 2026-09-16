@@ -16,12 +16,15 @@ import { updateSupplierSelfAction, submitSupplierForReviewAction } from '@/modul
 import { requestOrderItemAction } from '@/modules/orders/actions';
 import { addTeamMemberAction, removeTeamMemberAction } from '@/modules/team/actions';
 import { addDocumentAction } from '@/modules/documents/actions';
+import { uploadFile, buildUploadPath, fileSizeMb } from '@/lib/firebase/storage';
 import { EventUpdatesFeed } from '@/components/shared/EventUpdatesFeed';
 import { DiscussionPanel } from '@/components/shared/DiscussionPanel';
 import { EventHero } from '@/components/portal/EventHero';
 import { ExhibitorDashboard } from '@/components/portal/ExhibitorDashboard';
 import { Avatar } from '@/components/ui/Avatar';
 import { updateMyAvatarAction } from '@/modules/users/profile-actions';
+import { mergeDeadlinesWithEvent } from '@/utils/deadlines';
+import { markDiscussionReadAction } from '@/modules/discussions/actions';
 import type { Supplier, SupplierOrder, Payment, CatalogItem, TeamMember, SupplierDocument, Deadline, FirestoreEvent, EventUpdate, DiscussionMessage } from '@/types/domain';
 
 const TABS = [
@@ -37,8 +40,8 @@ const TABS = [
   { key: 'discussoes', label: 'Discussões' },
 ];
 
-export function PortalClient({ userName, userAvatarUrl, eventName, event, updates, supplier, orders, payments, catalogItems, team, documents, deadlines, discussion }: {
-  userName: string; userAvatarUrl?: string | null; eventName: string; event: FirestoreEvent | null; updates: EventUpdate[];
+export function PortalClient({ userName, userAvatarUrl, lastDiscussionReadAt, eventName, event, updates, supplier, orders, payments, catalogItems, team, documents, deadlines, discussion }: {
+  userName: string; userAvatarUrl?: string | null; lastDiscussionReadAt: string | null; eventName: string; event: FirestoreEvent | null; updates: EventUpdate[];
   supplier: Supplier; orders: SupplierOrder[]; payments: Payment[];
   catalogItems: CatalogItem[]; team: TeamMember[]; documents: SupplierDocument[]; deadlines: Deadline[];
   discussion: DiscussionMessage[];
@@ -48,6 +51,13 @@ export function PortalClient({ userName, userAvatarUrl, eventName, event, update
   const [tab, setTab] = useState('geral');
   const [logoutConfirm, setLogoutConfirm] = useState(false);
   const balance = calculateSupplierBalance(orders, payments);
+
+  const hasUnreadDiscussion = discussion.some((m) => m.authorName !== userName && (!lastDiscussionReadAt || m.createdAt > lastDiscussionReadAt));
+
+  function handleTabChange(next: string) {
+    setTab(next);
+    if (next === 'discussoes' && hasUnreadDiscussion) markDiscussionReadAction();
+  }
 
   async function handleLogout() {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -62,9 +72,19 @@ export function PortalClient({ userName, userAvatarUrl, eventName, event, update
     <div>
       <div className="portal-topbar">
         <div className="brand-mark">dash<span className="dot">.</span> <span style={{ fontSize: 12, fontWeight: 500, color: '#C7CAF0' }}>Portal do Expositor</span></div>
-        <div className="user-chip" style={{ background: 'rgba(255,255,255,.08)', borderColor: 'transparent', color: '#fff' }} onClick={() => setLogoutConfirm(true)}>
-          <Avatar name={userName} url={userAvatarUrl} size={28} />
-          <div><span className="name" style={{ color: '#fff' }}>{userName}</span><span className="role" style={{ color: '#C7CAF0' }}>Expositor</span></div>
+        <div className="flex items-center gap-16">
+          {hasUnreadDiscussion && (
+            <button
+              className="portal-msg-alert" title="Novas mensagens na Discussão"
+              onClick={() => handleTabChange('discussoes')}
+            >
+              💬<span className="pill-count">●</span>
+            </button>
+          )}
+          <div className="user-chip" style={{ background: 'rgba(255,255,255,.08)', borderColor: 'transparent', color: '#fff' }} onClick={() => setLogoutConfirm(true)}>
+            <Avatar name={userName} url={userAvatarUrl} size={28} />
+            <div><span className="name" style={{ color: '#fff' }}>{userName}</span><span className="role" style={{ color: '#C7CAF0' }}>Expositor</span></div>
+          </div>
         </div>
       </div>
 
@@ -74,7 +94,12 @@ export function PortalClient({ userName, userAvatarUrl, eventName, event, update
 
       <div className="portal-tabs">
         <div className="tabs">
-          {TABS.map((t) => <button key={t.key} className={`tab-btn ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>{t.label}</button>)}
+          {TABS.map((t) => (
+            <button key={t.key} className={`tab-btn ${tab === t.key ? 'active' : ''}`} onClick={() => handleTabChange(t.key)}>
+              {t.label}
+              {t.key === 'discussoes' && hasUnreadDiscussion && <span className="pill-count" title="Novas mensagens">●</span>}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -82,16 +107,16 @@ export function PortalClient({ userName, userAvatarUrl, eventName, event, update
         {tab === 'geral' && (
           <ExhibitorDashboard
             supplier={supplier} event={event} updates={updates} orders={orders}
-            team={team} deadlines={deadlines} balance={balance} onNavigate={setTab}
+            team={team} deadlines={mergeDeadlinesWithEvent(event, deadlines)} balance={balance} onNavigate={handleTabChange}
           />
         )}
         {tab === 'updates' && <EventUpdatesFeed eventId={supplier.eventId} updates={updates} canPublish={false} />}
         {tab === 'cadastro' && <PortalCadastro supplier={supplier} userAvatarUrl={userAvatarUrl} toast={toast} refresh={refresh} />}
         {tab === 'extras' && <PortalExtras orders={orders} catalogItems={catalogItems} orderDeadline={event?.orderDeadline ?? null} toast={toast} refresh={refresh} />}
         {tab === 'equipe' && <PortalEquipe supplier={supplier} team={team} toast={toast} refresh={refresh} />}
-        {tab === 'documentos' && <PortalDocumentos supplier={supplier} documents={documents} toast={toast} refresh={refresh} />}
+        {tab === 'documentos' && <PortalDocumentos supplier={supplier} documents={documents} maxUploadSizeMb={event?.maxUploadSizeMb ?? 2} toast={toast} refresh={refresh} />}
         {tab === 'financeiro' && <PortalFinanceiro balance={balance} payments={payments} />}
-        {tab === 'prazos' && <PortalPrazos deadlines={deadlines} />}
+        {tab === 'prazos' && <PortalPrazos deadlines={mergeDeadlinesWithEvent(event, deadlines)} />}
         {tab === 'manual' && <PortalManual event={event} />}
         {tab === 'discussoes' && <DiscussionPanel supplierId={supplier.id} messages={discussion} viewerSide="EXPOSITOR" />}
       </div>
@@ -344,22 +369,37 @@ function PortalEquipe({ supplier, team, toast, refresh }: { supplier: Supplier; 
 }
 
 /* ------------------------------ DOCUMENTOS ----------------------------------- */
-function PortalDocumentos({ supplier, documents, toast, refresh }: { supplier: Supplier; documents: SupplierDocument[]; toast: (m: string, t?: 'success' | 'error') => void; refresh: () => void }) {
+function PortalDocumentos({ supplier, documents, maxUploadSizeMb, toast, refresh }: {
+  supplier: Supplier; documents: SupplierDocument[]; maxUploadSizeMb: number;
+  toast: (m: string, t?: 'success' | 'error') => void; refresh: () => void;
+}) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
   async function handleAdd(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    const tipo = String(fd.get('tipo') || '');
+    const fileInput = form.querySelector<HTMLInputElement>('input[type=file]');
+    const file = fileInput?.files?.[0];
+    if (!file) { toast('Selecione um arquivo.', 'error'); return; }
+    if (fileSizeMb(file) > maxUploadSizeMb) { toast(`Arquivo muito grande. O limite deste evento é ${maxUploadSizeMb}MB.`, 'error'); return; }
+
     setSaving(true);
-    const fd = new FormData(e.currentTarget);
-    const fileInput = e.currentTarget.querySelector<HTMLInputElement>('input[type=file]');
-    const name = fileInput?.files?.[0]?.name || String(fd.get('nome') || '');
-    const result = await addDocumentAction(supplier.id, { nome: name, tipo: fd.get('tipo') });
-    setSaving(false);
-    if (!result.ok) { toast(result.error, 'error'); return; }
-    toast('Documento enviado.', 'success');
-    setDrawerOpen(false);
-    refresh();
+    try {
+      const path = buildUploadPath('documents', supplier.eventId, supplier.id, file.name);
+      const { url, storagePath } = await uploadFile(path, file);
+      const result = await addDocumentAction(supplier.id, { nome: file.name, tipo, url, storagePath, sizeBytes: file.size });
+      if (!result.ok) { toast(result.error, 'error'); return; }
+      toast('Documento enviado.', 'success');
+      setDrawerOpen(false);
+      refresh();
+    } catch {
+      toast('Falha ao enviar o arquivo.', 'error');
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -374,8 +414,11 @@ function PortalDocumentos({ supplier, documents, toast, refresh }: { supplier: S
           <tbody>
             {documents.length === 0 && <tr><td colSpan={4}><EmptyState icon="📄" title="Nenhum documento enviado" text="Envie os documentos exigidos pela produção do evento." /></td></tr>}
             {documents.map((d) => (
-              <tr key={d.id}><td className="table-name">{d.nome}</td><td>{d.tipo}</td>
-                <td><StatusBadge value={d.status} labelMap={DOCUMENT_STATUS_LABEL} /></td><td>{fmtDateShort(d.uploadedAt)}</td></tr>
+              <tr key={d.id}>
+                <td className="table-name">{d.url ? <a href={d.url} target="_blank" rel="noopener noreferrer">{d.nome}</a> : d.nome}</td>
+                <td>{d.tipo}</td>
+                <td><StatusBadge value={d.status} labelMap={DOCUMENT_STATUS_LABEL} /></td><td>{fmtDateShort(d.uploadedAt)}</td>
+              </tr>
             ))}
           </tbody>
         </table>
@@ -384,9 +427,13 @@ function PortalDocumentos({ supplier, documents, toast, refresh }: { supplier: S
         footer={<><button className="btn btn-secondary" onClick={() => setDrawerOpen(false)}>Cancelar</button><button form="doc-form" className="btn btn-primary" disabled={saving}>{saving ? 'Enviando...' : 'Enviar'}</button></>}>
         <form id="doc-form" className="flex-col gap-16" onSubmit={handleAdd}>
           <div className="field"><label>Tipo de documento <span className="req">*</span></label>
-            <select name="tipo" required><option>Contrato social</option><option>Cartão CNPJ</option><option>Ficha técnica do estande</option><option>ART/Laudo elétrico</option><option>Outro</option></select></div>
+            <select name="tipo" required>
+              <option>Contrato social</option><option>Cartão CNPJ</option><option>Ficha técnica do estande</option>
+              <option>ART/Laudo elétrico</option><option>Comprovante de pagamento</option><option>Outro</option>
+            </select>
+          </div>
           <div className="field"><label>Arquivo <span className="req">*</span></label><input type="file" required /></div>
-          <p className="text-sm text-muted">Nesta versão o nome do arquivo é registrado no sistema; o armazenamento do binário no Firebase Storage é o próximo passo (ver docs/BATCH-01-DELIVERY.md).</p>
+          <p className="text-sm text-muted">Tamanho máximo: {maxUploadSizeMb}MB.</p>
         </form>
       </Drawer>
     </div>

@@ -36,6 +36,7 @@ export default async function PortalPage() {
     <PortalClient
       userName={user.name}
       userAvatarUrl={user.avatarUrl}
+      lastDiscussionReadAt={user.lastDiscussionReadAt ?? null}
       eventName={event?.name ?? ''}
       event={event}
       updates={updates}

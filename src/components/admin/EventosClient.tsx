@@ -9,14 +9,19 @@ import { fmtDateShort } from '@/utils/format';
 import {
   createEventAction, updateEventAction, addSharedDocumentAction, removeSharedDocumentAction,
 } from '@/modules/events/actions';
-import type { FirestoreEvent } from '@/types/domain';
+import { createDeadlineAction, deleteDeadlineAction } from '@/modules/deadlines/actions';
+import { uploadFile, buildUploadPath, fileSizeMb } from '@/lib/firebase/storage';
+import type { FirestoreEvent, Deadline } from '@/types/domain';
 
-export function EventosClient({ events, currentEventId }: { events: FirestoreEvent[]; currentEventId: string | null }) {
+export function EventosClient({ events, currentEventId, deadlinesByEvent }: { events: FirestoreEvent[]; currentEventId: string | null; deadlinesByEvent: Record<string, Deadline[]> }) {
   const router = useRouter();
   const { toast, ToastHost } = useToast();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<FirestoreEvent | null>(null);
   const [docsFor, setDocsFor] = useState<FirestoreEvent | null>(null);
+  const [deadlinesFor, setDeadlinesFor] = useState<FirestoreEvent | null>(null);
+  const [removingDeadline, setRemovingDeadline] = useState<Deadline | null>(null);
+  const [uploadingDoc, setUploadingDoc] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [removingDoc, setRemovingDoc] = useState<{ eventId: string; docId: string; name: string } | null>(null);
@@ -45,6 +50,7 @@ export function EventosClient({ events, currentEventId }: { events: FirestoreEve
       floorPlanUrl: String(fd.get('floorPlanUrl') || ''),
       orderDeadline: String(fd.get('orderDeadline') || ''),
       guideContent: String(fd.get('guideContent') || ''),
+      maxUploadSizeMb: Number(fd.get('maxUploadSizeMb') || 2),
     };
 
     const result = editing ? await updateEventAction(editing.id, payload) : await createEventAction(payload);
@@ -72,6 +78,53 @@ export function EventosClient({ events, currentEventId }: { events: FirestoreEve
     setRemovingDoc(null);
     if (!result.ok) { toast(result.error, 'error'); return; }
     toast('Documento removido.', 'success');
+    router.refresh();
+  }
+
+  async function handleAddDeadline(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!deadlinesFor) return;
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    const result = await createDeadlineAction(deadlinesFor.id, { titulo: fd.get('titulo'), descricao: fd.get('descricao'), dataLimite: fd.get('dataLimite') });
+    if (!result.ok) { toast(result.error, 'error'); return; }
+    toast('Prazo adicionado.', 'success');
+    form.reset();
+    router.refresh();
+  }
+
+  async function handleUploadEventDoc(e: React.ChangeEvent<HTMLInputElement>, event: FirestoreEvent | null) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !event) return;
+
+    const maxMb = event.maxUploadSizeMb ?? 2;
+    if (fileSizeMb(file) > maxMb) {
+      toast(`Arquivo muito grande. O limite deste evento é ${maxMb}MB.`, 'error');
+      return;
+    }
+
+    setUploadingDoc(true);
+    try {
+      const path = buildUploadPath('event-documents', event.id, file.name);
+      const { url } = await uploadFile(path, file);
+      const result = await addSharedDocumentAction(event.id, { name: file.name, url });
+      if (!result.ok) { toast(result.error, 'error'); return; }
+      toast('Documento enviado.', 'success');
+      router.refresh();
+    } catch {
+      toast('Falha ao enviar o arquivo.', 'error');
+    } finally {
+      setUploadingDoc(false);
+    }
+  }
+
+  async function handleRemoveDeadline() {
+    if (!removingDeadline) return;
+    const result = await deleteDeadlineAction(removingDeadline.id);
+    setRemovingDeadline(null);
+    if (!result.ok) { toast(result.error, 'error'); return; }
+    toast('Prazo removido.', 'success');
     router.refresh();
   }
 
@@ -110,6 +163,7 @@ export function EventosClient({ events, currentEventId }: { events: FirestoreEve
                   <td>{(e.sharedDocuments ?? []).length}</td>
                   <td className="row-actions">
                     <button className="btn btn-ghost btn-sm" onClick={() => openEdit(e)}>Configurar</button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => setDeadlinesFor(e)}>Prazos</button>
                     <button className="btn btn-ghost btn-sm" onClick={() => setDocsFor(e)}>Documentos</button>
                   </td>
                 </tr>
@@ -180,6 +234,11 @@ export function EventosClient({ events, currentEventId }: { events: FirestoreEve
                 <label>Manual / guia do expositor</label>
                 <textarea name="guideContent" rows={8} defaultValue={editing?.guideContent} placeholder="Escreva aqui as orientações que o expositor verá no portal (horários de montagem, regras, contatos...)" />
               </div>
+              <div className="field">
+                <label>Tamanho máximo de upload (MB)</label>
+                <input type="number" min={1} max={9} name="maxUploadSizeMb" defaultValue={editing?.maxUploadSizeMb ?? 2} />
+                <p className="help">Vale para documentos enviados por expositores e pela DASH neste evento. Padrão: 2MB.</p>
+              </div>
             </div>
           </fieldset>
         </form>
@@ -219,9 +278,64 @@ export function EventosClient({ events, currentEventId }: { events: FirestoreEve
           <form id="doc-form" className="flex-col gap-12" onSubmit={handleAddDoc}>
             <div className="field"><label>Nome do documento <span className="req">*</span></label><input required name="docName" placeholder="Ex: Manual de montagem 2026" /></div>
             <div className="field"><label>Link <span className="req">*</span></label><input required name="docUrl" type="url" placeholder="https://..." /></div>
+            <p className="text-sm text-muted" style={{ margin: 0 }}>
+              Prefere enviar um arquivo em vez de colar um link? Use o campo abaixo — ele preenche o link automaticamente.
+            </p>
+            <div className="field">
+              <label>Ou envie um arquivo (máx. {docsFor?.maxUploadSizeMb ?? 2}MB)</label>
+              <input type="file" onChange={(e) => handleUploadEventDoc(e, docsFor)} disabled={uploadingDoc} />
+              {uploadingDoc && <p className="help">Enviando arquivo...</p>}
+            </div>
           </form>
         </div>
       </Drawer>
+
+      <Drawer
+        open={Boolean(deadlinesFor)}
+        title={`Prazos · ${deadlinesFor?.name ?? ''}`}
+        onClose={() => setDeadlinesFor(null)}
+        footer={<><button className="btn btn-secondary" onClick={() => setDeadlinesFor(null)}>Fechar</button><button form="deadline-form" className="btn btn-primary">Adicionar prazo</button></>}
+      >
+        <div className="flex-col gap-16">
+          <p className="text-secondary text-sm">
+            Estes prazos aparecem no widget &quot;Próximos prazos&quot; do portal do expositor, junto com o prazo final
+            de pedidos configurado na aba principal (quando definido).
+          </p>
+          <div className="table-wrap">
+            <div className="table-scroll">
+              <table className="data-table">
+                <thead><tr><th>Prazo</th><th>Data</th><th></th></tr></thead>
+                <tbody>
+                  {(deadlinesFor ? (deadlinesByEvent[deadlinesFor.id] ?? []) : []).length === 0 && (
+                    <tr><td colSpan={3}><EmptyState icon="⏰" title="Nenhum prazo cadastrado" text="Adicione o primeiro abaixo." /></td></tr>
+                  )}
+                  {(deadlinesFor ? (deadlinesByEvent[deadlinesFor.id] ?? []) : []).map((d) => (
+                    <tr key={d.id}>
+                      <td><div className="table-name">{d.titulo}</div>{d.descricao && <div className="table-sub">{d.descricao}</div>}</td>
+                      <td>{fmtDateShort(d.dataLimite)}</td>
+                      <td className="row-actions"><button className="btn btn-ghost btn-sm" onClick={() => setRemovingDeadline(d)}>Remover</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <form id="deadline-form" className="flex-col gap-12" onSubmit={handleAddDeadline}>
+            <div className="field"><label>Título <span className="req">*</span></label><input required name="titulo" placeholder="Ex: Envio dos documentos obrigatórios" /></div>
+            <div className="field"><label>Data limite <span className="req">*</span></label><input required type="date" name="dataLimite" /></div>
+            <div className="field"><label>Descrição</label><textarea name="descricao" rows={2} /></div>
+          </form>
+        </div>
+      </Drawer>
+
+      <ConfirmModal
+        open={Boolean(removingDeadline)}
+        title="Remover prazo"
+        message={`"${removingDeadline?.titulo}" deixará de aparecer para os expositores.`}
+        confirmLabel="Remover" danger
+        onCancel={() => setRemovingDeadline(null)}
+        onConfirm={handleRemoveDeadline}
+      />
 
       <ConfirmModal
         open={Boolean(removingDoc)}

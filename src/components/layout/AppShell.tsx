@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { listEvents } from '@/modules/events/queries';
 import { getCurrentEventId } from '@/lib/event-context';
 import { getEventPendingCount } from '@/modules/approvals/queries';
+import { getAdminAlerts } from '@/modules/alerts/queries';
+import { NotificationBell } from '@/components/layout/NotificationBell';
 import { EventSwitcher, LogoutTrigger, MobileMenuToggle } from '@/components/layout/TopbarClient';
 import { ROLE_LABEL } from '@/config/labels';
 import type { UserProfile } from '@/types/domain';
@@ -23,6 +25,7 @@ export async function AppShell({ active, user, children }: { active: string; use
   const currentEventId = await getCurrentEventId();
   // Contador de pendências exibido ao lado de "Expositores" na barra lateral.
   const pendingCount = currentEventId ? await getEventPendingCount(currentEventId) : 0;
+  const alerts = currentEventId ? await getAdminAlerts(currentEventId) : [];
 
   return (
     <div className="app-shell">
@@ -63,6 +66,7 @@ export async function AppShell({ active, user, children }: { active: string; use
             <EventSwitcher events={events.map((e) => ({ id: e.id, name: e.name }))} currentEventId={currentEventId} />
           </div>
           <div className="topbar-right">
+            <NotificationBell alerts={alerts} />
             <LogoutTrigger userName={user.name} roleLabel={ROLE_LABEL[user.role]} />
           </div>
         </div>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { StatusBadge, Badge, EmptyState } from '@/components/ui/Badge';
 import { Drawer } from '@/components/ui/Drawer';
 import { useToast } from '@/components/ui/useToast';
@@ -11,14 +11,16 @@ import {
   ORDER_STATUS_LABEL, APPROVAL_STATUS_LABEL, BILLING_UNIT_LABEL, PAYMENT_STATUS_LABEL, DOCUMENT_STATUS_LABEL,
 } from '@/config/labels';
 import { calculateSupplierBalance, calculateOrderItemTotal } from '@/modules/orders/calculations';
-import { verifySupplierAction, validateSupplierAction, requestCorrectionAction, resetSupplierPasswordAction } from '@/modules/suppliers/actions';
+import { verifySupplierAction, validateSupplierAction, requestCorrectionAction } from '@/modules/suppliers/actions';
 import { addManualOrderItemAction, approveOrderItemAction } from '@/modules/orders/actions';
 import { registerPaymentAction, updatePaymentStatusAction } from '@/modules/payments/actions';
 import { addTeamMemberAction, removeTeamMemberAction } from '@/modules/team/actions';
-import { reviewDocumentAction } from '@/modules/documents/actions';
+import { reviewDocumentAction, addDocumentAction } from '@/modules/documents/actions';
+import { uploadFile, buildUploadPath, fileSizeMb } from '@/lib/firebase/storage';
 import { DiscussionPanel } from '@/components/shared/DiscussionPanel';
+import { SupplierUsersPanel } from '@/components/admin/SupplierUsersPanel';
 import type { SupplierPendingCounts } from '@/modules/approvals/pending';
-import type { Supplier, SupplierOrder, Payment, CatalogItem, TeamMember, SupplierDocument, AuditLog, PaymentStatus, DiscussionMessage } from '@/types/domain';
+import type { Supplier, SupplierOrder, Payment, CatalogItem, TeamMember, SupplierDocument, AuditLog, PaymentStatus, DiscussionMessage, UserProfile } from '@/types/domain';
 
 const TABS: { key: string; label: string; pendingKey?: keyof SupplierPendingCounts }[] = [
   { key: 'geral', label: 'Visão geral' },
@@ -32,15 +34,16 @@ const TABS: { key: string; label: string; pendingKey?: keyof SupplierPendingCoun
 ];
 
 export function ExpositorDetailClient({
-  supplier, orders, payments, catalogItems, team, documents, auditLogs, discussion, pendings,
+  supplier, orders, payments, catalogItems, team, documents, auditLogs, discussion, pendings, supplierUsers, maxUploadSizeMb,
 }: {
   supplier: Supplier; orders: SupplierOrder[]; payments: Payment[]; catalogItems: CatalogItem[];
   team: TeamMember[]; documents: SupplierDocument[]; auditLogs: AuditLog[];
-  discussion: DiscussionMessage[]; pendings: SupplierPendingCounts;
+  discussion: DiscussionMessage[]; pendings: SupplierPendingCounts; supplierUsers: UserProfile[]; maxUploadSizeMb: number;
 }) {
   const router = useRouter();
   const { toast, ToastHost } = useToast();
-  const [tab, setTab] = useState('geral');
+  const searchParams = useSearchParams();
+  const [tab, setTab] = useState(searchParams.get('tab') || 'geral');
   const balance = calculateSupplierBalance(orders, payments);
 
   function refresh() { router.refresh(); }
@@ -70,10 +73,10 @@ export function ExpositorDetailClient({
       </div>
 
       {tab === 'geral' && <TabGeral supplier={supplier} orders={orders} balance={balance} />}
-      {tab === 'cadastro' && <TabCadastro supplier={supplier} toast={toast} refresh={refresh} />}
+      {tab === 'cadastro' && <TabCadastro supplier={supplier} supplierUsers={supplierUsers} toast={toast} refresh={refresh} />}
       {tab === 'extras' && <TabExtras supplier={supplier} orders={orders} catalogItems={catalogItems} toast={toast} refresh={refresh} />}
       {tab === 'equipe' && <TabEquipe supplier={supplier} team={team} toast={toast} refresh={refresh} />}
-      {tab === 'documentos' && <TabDocumentos documents={documents} toast={toast} refresh={refresh} />}
+      {tab === 'documentos' && <TabDocumentos supplier={supplier} documents={documents} maxUploadSizeMb={maxUploadSizeMb} toast={toast} refresh={refresh} />}
       {tab === 'pagamentos' && <TabPagamentos supplier={supplier} payments={payments} balance={balance} toast={toast} refresh={refresh} />}
       {tab === 'discussao' && <DiscussionPanel supplierId={supplier.id} messages={discussion} viewerSide="DASH" canDelete />}
       {tab === 'historico' && <TabHistorico auditLogs={auditLogs} />}
@@ -119,9 +122,8 @@ function TabGeral({ supplier, orders, balance }: { supplier: Supplier; orders: S
 }
 
 /* ------------------------------- CADASTRO --------------------------------- */
-function TabCadastro({ supplier, toast, refresh }: { supplier: Supplier; toast: (m: string, t?: 'success' | 'error') => void; refresh: () => void }) {
+function TabCadastro({ supplier, supplierUsers, toast, refresh }: { supplier: Supplier; supplierUsers: UserProfile[]; toast: (m: string, t?: 'success' | 'error') => void; refresh: () => void }) {
   const [busy, setBusy] = useState(false);
-  const [credentials, setCredentials] = useState<{ email: string; tempPassword: string } | null>(null);
 
   async function run(action: () => Promise<{ ok: boolean; error?: string }>, okMsg: string) {
     setBusy(true);
@@ -129,16 +131,6 @@ function TabCadastro({ supplier, toast, refresh }: { supplier: Supplier; toast: 
     setBusy(false);
     if (!res.ok) { toast(res.error ?? 'Erro.', 'error'); return; }
     toast(okMsg, 'success');
-    refresh();
-  }
-
-  async function handleResetPassword() {
-    setBusy(true);
-    const res = await resetSupplierPasswordAction(supplier.id);
-    setBusy(false);
-    if (!res.ok) { toast(res.error, 'error'); return; }
-    if (res.credentials) setCredentials(res.credentials);
-    toast('Nova senha temporária gerada.', 'success');
     refresh();
   }
 
@@ -183,35 +175,7 @@ function TabCadastro({ supplier, toast, refresh }: { supplier: Supplier; toast: 
         </div>
       </div>
 
-      <div className="card mt-16">
-        <div className="card-header"><h3>Acesso ao portal</h3></div>
-        <div className="card-body">
-          <div className="form-grid mb-16">
-            <div className="field"><label>E-mail de login</label><div>{supplier.responsavel.email || '—'}</div></div>
-            <div className="field"><label>Situação</label>
-              <div>{supplier.authUid ? <Badge label="Acesso ativo" tone="success" /> : <Badge label="Sem acesso criado" tone="neutral" />}</div>
-            </div>
-          </div>
-          <button className="btn btn-secondary" disabled={busy || !supplier.responsavel.email} onClick={handleResetPassword}>
-            {supplier.authUid ? 'Gerar nova senha temporária' : 'Criar acesso ao portal'}
-          </button>
-          <p className="text-sm text-muted mt-8">
-            A senha é mostrada uma única vez, logo após ser gerada. O expositor será obrigado a trocá-la no primeiro acesso.
-          </p>
-        </div>
-      </div>
-
-      {credentials && (
-        <div className="overlay open" onMouseDown={(e) => { if (e.target === e.currentTarget) setCredentials(null); }}>
-          <div className="modal">
-            <h3>Acesso gerado</h3>
-            <p>Copie agora — a senha não será mostrada novamente. Repasse ao expositor por fora do sistema.</p>
-            <div className="field mb-16"><label>E-mail</label><input readOnly value={credentials.email} onFocus={(e) => e.target.select()} /></div>
-            <div className="field mb-16"><label>Senha temporária</label><input readOnly value={credentials.tempPassword} onFocus={(e) => e.target.select()} /></div>
-            <div className="modal-actions"><button className="btn btn-primary" onClick={() => setCredentials(null)}>Já copiei, fechar</button></div>
-          </div>
-        </div>
-      )}
+      <SupplierUsersPanel supplierId={supplier.id} users={supplierUsers} toast={toast} />
     </>
   );
 }
@@ -362,7 +326,13 @@ function TabEquipe({ supplier, team, toast, refresh }: { supplier: Supplier; tea
 }
 
 /* ------------------------------- DOCUMENTOS -------------------------------- */
-function TabDocumentos({ documents, toast, refresh }: { documents: SupplierDocument[]; toast: (m: string, t?: 'success' | 'error') => void; refresh: () => void }) {
+function TabDocumentos({ supplier, documents, maxUploadSizeMb, toast, refresh }: {
+  supplier: Supplier; documents: SupplierDocument[]; maxUploadSizeMb: number;
+  toast: (m: string, t?: 'success' | 'error') => void; refresh: () => void;
+}) {
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
   async function handleReview(id: string, status: 'APPROVED' | 'REJECTED') {
     const res = await reviewDocumentAction(id, status);
     if (!res.ok) { toast(res.error, 'error'); return; }
@@ -370,17 +340,49 @@ function TabDocumentos({ documents, toast, refresh }: { documents: SupplierDocum
     refresh();
   }
 
+  async function handleUpload(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    const tipo = String(fd.get('tipo') || '');
+    const fileInput = form.querySelector<HTMLInputElement>('input[type=file]');
+    const file = fileInput?.files?.[0];
+    if (!file) { toast('Selecione um arquivo.', 'error'); return; }
+    if (fileSizeMb(file) > maxUploadSizeMb) { toast(`Arquivo muito grande. O limite deste evento é ${maxUploadSizeMb}MB.`, 'error'); return; }
+
+    setUploading(true);
+    try {
+      const path = buildUploadPath('documents', supplier.eventId, supplier.id, file.name);
+      const { url, storagePath } = await uploadFile(path, file);
+      const res = await addDocumentAction(supplier.id, { nome: file.name, tipo, url, storagePath, sizeBytes: file.size });
+      if (!res.ok) { toast(res.error, 'error'); return; }
+      toast('Documento enviado.', 'success');
+      setDrawerOpen(false);
+      refresh();
+    } catch {
+      toast('Falha ao enviar o arquivo.', 'error');
+    } finally {
+      setUploading(false);
+    }
+  }
+
   return (
     <div className="table-wrap">
-      <div className="table-toolbar"><h3 style={{ fontFamily: 'var(--font-heading)', fontSize: 15 }}>Documentos enviados</h3></div>
+      <div className="table-toolbar">
+        <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: 15 }}>Documentos enviados</h3>
+        <button className="btn btn-primary btn-sm" onClick={() => setDrawerOpen(true)}>+ Enviar documento</button>
+      </div>
       <div className="table-scroll">
         <table className="data-table">
           <thead><tr><th>Documento</th><th>Tipo</th><th>Status</th><th>Enviado em</th><th></th></tr></thead>
           <tbody>
-            {documents.length === 0 && <tr><td colSpan={5}><EmptyState icon="📄" title="Nenhum documento enviado" text="Documentos são enviados pelo próprio expositor no portal." /></td></tr>}
+            {documents.length === 0 && <tr><td colSpan={5}><EmptyState icon="📄" title="Nenhum documento enviado" text="Documentos são enviados pelo próprio expositor no portal, ou aqui pela DASH." /></td></tr>}
             {documents.map((d) => (
               <tr key={d.id}>
-                <td className="table-name">{d.nome}</td><td>{d.tipo}</td>
+                <td className="table-name">
+                  {d.url ? <a href={d.url} target="_blank" rel="noopener noreferrer">{d.nome}</a> : d.nome}
+                </td>
+                <td>{d.tipo}</td>
                 <td><StatusBadge value={d.status} labelMap={DOCUMENT_STATUS_LABEL} /></td>
                 <td>{fmtDateShort(d.uploadedAt)}</td>
                 <td className="row-actions">
@@ -396,6 +398,22 @@ function TabDocumentos({ documents, toast, refresh }: { documents: SupplierDocum
           </tbody>
         </table>
       </div>
+
+      <Drawer
+        open={drawerOpen} title="Enviar documento" onClose={() => setDrawerOpen(false)}
+        footer={<><button className="btn btn-secondary" onClick={() => setDrawerOpen(false)}>Cancelar</button><button form="admin-doc-form" className="btn btn-primary" disabled={uploading}>{uploading ? 'Enviando...' : 'Enviar'}</button></>}
+      >
+        <form id="admin-doc-form" className="flex-col gap-16" onSubmit={handleUpload}>
+          <div className="field"><label>Tipo de documento <span className="req">*</span></label>
+            <select name="tipo" required>
+              <option>Contrato social</option><option>Cartão CNPJ</option><option>Ficha técnica do estande</option>
+              <option>ART/Laudo elétrico</option><option>Comprovante de pagamento</option><option>Outro</option>
+            </select>
+          </div>
+          <div className="field"><label>Arquivo <span className="req">*</span></label><input type="file" required /></div>
+          <p className="text-sm text-muted">Tamanho máximo: {maxUploadSizeMb}MB (configurável em Eventos).</p>
+        </form>
+      </Drawer>
     </div>
   );
 }
